@@ -198,10 +198,10 @@ async def process_query(
             for r in step_results
         ]
 
-        # Save to conversation context
+        # Save to conversation context (both query and response)
         await cache.add_to_conversation(
             str(conversation_id),
-            {"query": request.query, "intent": result["intent"]},
+            {"query": request.query, "response": response_text, "intent": result["intent"]},
         )
 
         # Create conversation if new
@@ -280,8 +280,7 @@ async def _stream_query_response(
         return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
     try:
-        # Step 1: Get orchestrator
-        yield sse_event("status", {"message": "Initializing...", "step": 0, "total_steps": 4})
+        # Step 1: Get orchestrator (no status message - happens quickly)
 
         from app.core.orchestrator import Orchestrator
         from app.core.intent import IntentClassifier
@@ -300,15 +299,15 @@ async def _stream_query_response(
         calendar_service = CalendarService(db, credentials)
         drive_service = DriveService(db, credentials)
 
-        # Create agents
+        # IntentClassifier needs LLM, not embedding service
+        llm = get_llm()
+
+        # Create agents (GmailAgent needs LLM for email composition)
         agents = {
-            ServiceType.GMAIL: GmailAgent(gmail_service, embedding_service),
+            ServiceType.GMAIL: GmailAgent(gmail_service, embedding_service, llm),
             ServiceType.GCAL: GcalAgent(calendar_service, embedding_service),
             ServiceType.GDRIVE: GdriveAgent(drive_service, embedding_service),
         }
-
-        # IntentClassifier needs LLM, not embedding service
-        llm = get_llm()
         classifier = IntentClassifier(llm)
         planner = QueryPlanner()
         orchestrator = Orchestrator(classifier, planner, agents)
@@ -374,7 +373,7 @@ async def _stream_query_response(
             # Execute steps in parallel
             tasks = []
             for step in steps:
-                params = orchestrator._enrich_params(step, step_results, intent)
+                params = orchestrator._enrich_params(step, step_results, intent, query)
                 task = orchestrator._execute_step(step, params, user_id)
                 tasks.append((step.step_id, step.step, task))
 
@@ -407,18 +406,31 @@ async def _stream_query_response(
             query=query,
             intent=intent,
             results=step_results_list,
+            conversation_context=conversation_context,
         )
 
-        # Stream the response text in chunks for a more dynamic feel
-        words = response_text.split()
-        chunk_size = 5  # Send 5 words at a time
+        # Stream the response text in chunks while preserving newlines
+        # Split by lines first, then stream each line with its words
+        lines = response_text.split('\n')
         streamed_text = ""
+        chunk_size = 5  # Words per chunk
 
-        for i in range(0, len(words), chunk_size):
-            chunk = " ".join(words[i:i + chunk_size])
-            streamed_text += chunk + " "
-            yield sse_event("response_chunk", {"text": chunk + " ", "partial": streamed_text.strip()})
-            await asyncio.sleep(0.02)  # Small delay for streaming effect
+        for line_idx, line in enumerate(lines):
+            if line.strip():
+                # Stream non-empty lines word by word
+                words = line.split(' ')
+                for i in range(0, len(words), chunk_size):
+                    chunk = ' '.join(words[i:i + chunk_size])
+                    if i + chunk_size < len(words):
+                        chunk += ' '
+                    streamed_text += chunk
+                    yield sse_event("response_chunk", {"text": chunk, "partial": streamed_text})
+                    await asyncio.sleep(0.02)
+            # Add newline after each line (except the last one)
+            if line_idx < len(lines) - 1:
+                streamed_text += '\n'
+                yield sse_event("response_chunk", {"text": "\n", "partial": streamed_text})
+                await asyncio.sleep(0.01)
 
         # Convert results to ActionTaken format
         actions_taken = [
@@ -431,10 +443,10 @@ async def _stream_query_response(
             for r in step_results_list
         ]
 
-        # Save to conversation context
+        # Save to conversation context (both query and response for context)
         await cache.add_to_conversation(
             str(conversation_id),
-            {"query": query, "intent": intent.model_dump()},
+            {"query": query, "response": response_text, "intent": intent.model_dump()},
         )
 
         latency_ms = int((time.time() - start_time) * 1000)

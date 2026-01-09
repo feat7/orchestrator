@@ -26,7 +26,14 @@ class GcalAgent(BaseAgent):
     async def search(
         self, query: str, user_id: str, filters: Optional[dict] = None
     ) -> list[dict]:
-        """Search calendar events using semantic similarity.
+        """Search events using 3-way hybrid search with RRF fusion.
+
+        Combines three retrieval methods for best results:
+        1. BM25/Full-text search (keyword matching)
+        2. Vector search (semantic similarity)
+        3. Filtered vector search (if filters provided)
+
+        Results are fused using Reciprocal Rank Fusion (RRF).
 
         Args:
             query: The search query
@@ -34,18 +41,88 @@ class GcalAgent(BaseAgent):
             filters: Optional filters (date_range, attendees)
 
         Returns:
-            List of matching events
+            List of matching events, ranked by RRF score
         """
-        # Generate embedding for query
         query_embedding = await self.embeddings.embed(query)
 
-        # Search using vector similarity + metadata filters
-        results = await self.calendar.search_events(
+        # 1. BM25 search - also apply filters
+        bm25_results = await self.calendar.search_events_bm25(
+            user_id=user_id,
+            query=query,
+            filters=filters,
+            limit=20,
+        )
+
+        # 2. Vector search
+        semantic_results = await self.calendar.search_events(
             user_id=user_id,
             embedding=query_embedding,
-            filters=filters,
-            limit=10,
+            filters=None,
+            limit=20,
         )
+
+        # 3. Filtered search (if filters provided)
+        filtered_results = []
+        if filters:
+            filtered_results = await self.calendar.search_events(
+                user_id=user_id,
+                embedding=query_embedding,
+                filters=filters,
+                limit=20,
+            )
+
+        # Combine using RRF
+        results = self._rrf_fusion(bm25_results, semantic_results, filtered_results)
+        return results
+
+    def _rrf_fusion(
+        self,
+        bm25_results: list[dict],
+        semantic_results: list[dict],
+        filtered_results: list[dict],
+        k: int = 60,
+    ) -> list[dict]:
+        """Combine results using Reciprocal Rank Fusion (RRF)."""
+        rrf_scores: dict[str, float] = {}
+        result_data: dict[str, dict] = {}
+        match_sources: dict[str, list[str]] = {}
+
+        for rank, result in enumerate(bm25_results, start=1):
+            item_id = result.get("id")
+            if item_id:
+                rrf_scores[item_id] = rrf_scores.get(item_id, 0) + (1 / (k + rank))
+                if item_id not in result_data:
+                    result_data[item_id] = result
+                    match_sources[item_id] = []
+                match_sources[item_id].append("bm25")
+
+        for rank, result in enumerate(semantic_results, start=1):
+            item_id = result.get("id")
+            if item_id:
+                rrf_scores[item_id] = rrf_scores.get(item_id, 0) + (1 / (k + rank))
+                if item_id not in result_data:
+                    result_data[item_id] = result
+                    match_sources[item_id] = []
+                match_sources[item_id].append("semantic")
+
+        for rank, result in enumerate(filtered_results, start=1):
+            item_id = result.get("id")
+            if item_id:
+                rrf_scores[item_id] = rrf_scores.get(item_id, 0) + (1.5 / (k + rank))
+                if item_id not in result_data:
+                    result_data[item_id] = result
+                    match_sources[item_id] = []
+                match_sources[item_id].append("filter")
+
+        sorted_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
+
+        results = []
+        for item_id in sorted_ids[:10]:
+            result = result_data[item_id].copy()
+            result["rrf_score"] = round(rrf_scores[item_id], 4)
+            result["match_sources"] = match_sources[item_id]
+            results.append(result)
+
         return results
 
     async def execute(

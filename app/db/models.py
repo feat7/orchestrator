@@ -1,5 +1,5 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Index, Boolean
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Index, Boolean, Computed
+from sqlalchemy.dialects.postgresql import UUID, JSONB, TSVECTOR
 from pgvector.sqlalchemy import Vector
 from datetime import datetime
 import uuid
@@ -65,6 +65,8 @@ class GmailCache(Base):
     is_read = Column(Boolean, default=False)
     has_attachments = Column(Boolean, default=False)
     synced_at = Column(DateTime, default=datetime.utcnow)
+    # Full-text search vector (generated column for BM25)
+    search_vector = Column(TSVECTOR)
 
     __table_args__ = (
         Index(
@@ -76,6 +78,7 @@ class GmailCache(Base):
         Index("ix_gmail_user_email", "user_id", "email_id", unique=True),
         Index("ix_gmail_user_received", "user_id", "received_at"),
         Index("ix_gmail_user_sender", "user_id", "sender"),
+        Index("ix_gmail_search_vector", "search_vector", postgresql_using="gin"),
     )
 
 
@@ -98,6 +101,8 @@ class GcalCache(Base):
     status = Column(String(50))  # confirmed, tentative, cancelled
     embedding = Column(Vector(1536))
     synced_at = Column(DateTime, default=datetime.utcnow)
+    # Full-text search vector (generated column for BM25)
+    search_vector = Column(TSVECTOR)
 
     __table_args__ = (
         Index(
@@ -108,6 +113,7 @@ class GcalCache(Base):
         ),
         Index("ix_gcal_user_event", "user_id", "event_id", unique=True),
         Index("ix_gcal_user_time", "user_id", "start_time", "end_time"),
+        Index("ix_gcal_search_vector", "search_vector", postgresql_using="gin"),
     )
 
 
@@ -130,6 +136,8 @@ class GdriveCache(Base):
     created_at = Column(DateTime)
     modified_at = Column(DateTime)
     synced_at = Column(DateTime, default=datetime.utcnow)
+    # Full-text search vector (generated column for BM25)
+    search_vector = Column(TSVECTOR)
 
     __table_args__ = (
         Index(
@@ -141,6 +149,7 @@ class GdriveCache(Base):
         Index("ix_gdrive_user_file", "user_id", "file_id", unique=True),
         Index("ix_gdrive_user_modified", "user_id", "modified_at"),
         Index("ix_gdrive_user_mime", "user_id", "mime_type"),
+        Index("ix_gdrive_search_vector", "search_vector", postgresql_using="gin"),
     )
 
 

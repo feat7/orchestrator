@@ -46,7 +46,7 @@ class OpenAIProvider(LLMProvider):
 
     def __init__(self):
         self.client = AsyncOpenAI(api_key=settings.openai_api_key)
-        self.model = "gpt-4o-mini"  # Fast, cheap, non-thinking model
+        self.model = "gpt-4.1-mini"  # Fast, cheap, capable model
         self.embedding_model = settings.embedding_model
 
     async def complete(

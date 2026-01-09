@@ -4,7 +4,7 @@ from typing import Optional
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -40,6 +40,7 @@ class CalendarService:
         embedding: list[float],
         filters: Optional[dict] = None,
         limit: int = 10,
+        similarity_threshold: float = 0.25,
     ) -> list[dict]:
         """Search events using local cache with vector similarity.
 
@@ -51,12 +52,19 @@ class CalendarService:
             embedding: Query embedding vector
             filters: Optional filters (time_range, attendees)
             limit: Max results to return
+            similarity_threshold: Minimum similarity score (0-1) to include results
 
         Returns:
-            List of matching events
+            List of matching events with similarity scores
         """
+        # Calculate cosine distance and convert to similarity (1 - distance)
+        distance_expr = GcalCache.embedding.cosine_distance(embedding)
+
         # Always use local pgvector search for speed and semantic matching
-        query = select(GcalCache).where(
+        query = select(
+            GcalCache,
+            (1 - distance_expr).label("similarity")
+        ).where(
             GcalCache.user_id == uuid.UUID(user_id)
         )
 
@@ -95,28 +103,138 @@ class CalendarService:
             if filters.get("date_to"):
                 query = query.where(GcalCache.end_time <= filters["date_to"])
 
-        # Order by vector similarity (cosine distance)
-        query = query.order_by(
-            GcalCache.embedding.cosine_distance(embedding)
-        ).limit(limit)
+        # Order by similarity (descending) and limit
+        query = query.order_by(distance_expr).limit(limit * 2)
 
         result = await self.db.execute(query)
-        events = result.scalars().all()
+        rows = result.all()
 
-        return [
-            {
-                "id": str(e.event_id),
-                "title": e.title,
-                "description": e.description,
-                "start_time": e.start_time.isoformat() if e.start_time else None,
-                "end_time": e.end_time.isoformat() if e.end_time else None,
-                "attendees": e.attendees,
-                "location": e.location,
-                "meeting_link": e.meeting_link,
-                "status": e.status,
-            }
-            for e in events
-        ]
+        # Filter by similarity threshold and format results
+        events = []
+        for row in rows:
+            event = row[0]
+            similarity = float(row[1]) if row[1] is not None else 0
+
+            # Skip results below threshold
+            if similarity < similarity_threshold:
+                continue
+
+            events.append({
+                "id": str(event.event_id),
+                "title": event.title,
+                "description": event.description,
+                "start_time": event.start_time.isoformat() if event.start_time else None,
+                "end_time": event.end_time.isoformat() if event.end_time else None,
+                "attendees": event.attendees,
+                "location": event.location,
+                "meeting_link": event.meeting_link,
+                "status": event.status,
+                "similarity": round(similarity, 3),
+            })
+
+            if len(events) >= limit:
+                break
+
+        return events
+
+    async def search_events_bm25(
+        self,
+        user_id: str,
+        query: str,
+        filters: Optional[dict] = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Search events using BM25/full-text search (keyword matching).
+
+        Uses PostgreSQL's tsvector and ts_rank for fast keyword-based search.
+
+        Args:
+            user_id: The user's ID
+            query: Search query string
+            filters: Optional filters (time_range, date_from, date_to)
+            limit: Max results to return
+
+        Returns:
+            List of matching events with BM25 rank scores
+        """
+        words = query.lower().split()
+        if not words:
+            return []
+
+        tsquery = func.plainto_tsquery("english", query)
+
+        query_stmt = (
+            select(
+                GcalCache,
+                func.ts_rank(GcalCache.search_vector, tsquery).label("rank")
+            )
+            .where(GcalCache.user_id == uuid.UUID(user_id))
+            .where(GcalCache.search_vector.op("@@")(tsquery))
+        )
+
+        # Apply metadata filters (same as vector search)
+        if filters:
+            if filters.get("time_range") == "next_week":
+                now = datetime.utcnow()
+                query_stmt = query_stmt.where(
+                    GcalCache.start_time >= now,
+                    GcalCache.start_time <= now + timedelta(days=7),
+                )
+            elif filters.get("time_range") == "this_week":
+                now = datetime.utcnow()
+                query_stmt = query_stmt.where(
+                    GcalCache.start_time >= now,
+                    GcalCache.start_time <= now + timedelta(days=7),
+                )
+            elif filters.get("time") == "tomorrow" or filters.get("time_range") == "tomorrow":
+                now = datetime.utcnow()
+                tomorrow_start = now.replace(hour=0, minute=0, second=0) + timedelta(days=1)
+                tomorrow_end = tomorrow_start + timedelta(days=1)
+                query_stmt = query_stmt.where(
+                    GcalCache.start_time >= tomorrow_start,
+                    GcalCache.start_time < tomorrow_end,
+                )
+            elif filters.get("time_range") == "today":
+                now = datetime.utcnow()
+                today_start = now.replace(hour=0, minute=0, second=0)
+                today_end = today_start + timedelta(days=1)
+                query_stmt = query_stmt.where(
+                    GcalCache.start_time >= today_start,
+                    GcalCache.start_time < today_end,
+                )
+            if filters.get("date_from"):
+                query_stmt = query_stmt.where(GcalCache.start_time >= filters["date_from"])
+            if filters.get("date_to"):
+                query_stmt = query_stmt.where(GcalCache.end_time <= filters["date_to"])
+
+        query_stmt = (
+            query_stmt
+            .order_by(func.ts_rank(GcalCache.search_vector, tsquery).desc())
+            .limit(limit)
+        )
+
+        result = await self.db.execute(query_stmt)
+        rows = result.all()
+
+        events = []
+        for row in rows:
+            event = row[0]
+            rank = float(row[1]) if row[1] is not None else 0
+
+            events.append({
+                "id": str(event.event_id),
+                "title": event.title,
+                "description": event.description,
+                "start_time": event.start_time.isoformat() if event.start_time else None,
+                "end_time": event.end_time.isoformat() if event.end_time else None,
+                "attendees": event.attendees,
+                "location": event.location,
+                "meeting_link": event.meeting_link,
+                "status": event.status,
+                "bm25_rank": round(rank, 4),
+            })
+
+        return events
 
     async def get_event(self, user_id: str, event_id: str) -> Optional[dict]:
         """Get full event details.

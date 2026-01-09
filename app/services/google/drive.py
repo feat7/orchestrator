@@ -4,7 +4,7 @@ from typing import Optional
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -40,6 +40,7 @@ class DriveService:
         embedding: list[float],
         filters: Optional[dict] = None,
         limit: int = 10,
+        similarity_threshold: float = 0.25,
     ) -> list[dict]:
         """Search files using local cache with vector similarity.
 
@@ -51,12 +52,19 @@ class DriveService:
             embedding: Query embedding vector
             filters: Optional filters (mime_type, modified_date, name)
             limit: Max results to return
+            similarity_threshold: Minimum similarity score (0-1) to include results
 
         Returns:
-            List of matching files
+            List of matching files with similarity scores
         """
+        # Calculate cosine distance and convert to similarity (1 - distance)
+        distance_expr = GdriveCache.embedding.cosine_distance(embedding)
+
         # Always use local pgvector search for speed and semantic matching
-        query = select(GdriveCache).where(
+        query = select(
+            GdriveCache,
+            (1 - distance_expr).label("similarity")
+        ).where(
             GdriveCache.user_id == uuid.UUID(user_id)
         )
 
@@ -79,26 +87,118 @@ class DriveService:
                     GdriveCache.modified_at <= filters["modified_before"]
                 )
 
-        # Order by vector similarity (cosine distance)
-        query = query.order_by(
-            GdriveCache.embedding.cosine_distance(embedding)
-        ).limit(limit)
+        # Order by similarity (descending) and limit
+        query = query.order_by(distance_expr).limit(limit * 2)
 
         result = await self.db.execute(query)
-        files = result.scalars().all()
+        rows = result.all()
 
-        return [
-            {
-                "id": str(f.file_id),
-                "name": f.name,
-                "mime_type": f.mime_type,
-                "content_preview": f.content_preview,
-                "web_link": f.web_link,
-                "modified_at": f.modified_at.isoformat() if f.modified_at else None,
-                "owners": f.owners,
-            }
-            for f in files
-        ]
+        # Filter by similarity threshold and format results
+        files = []
+        for row in rows:
+            file = row[0]
+            similarity = float(row[1]) if row[1] is not None else 0
+
+            # Skip results below threshold
+            if similarity < similarity_threshold:
+                continue
+
+            files.append({
+                "id": str(file.file_id),
+                "name": file.name,
+                "mime_type": file.mime_type,
+                "content_preview": file.content_preview,
+                "web_link": file.web_link,
+                "modified_at": file.modified_at.isoformat() if file.modified_at else None,
+                "owners": file.owners,
+                "similarity": round(similarity, 3),
+            })
+
+            if len(files) >= limit:
+                break
+
+        return files
+
+    async def search_files_bm25(
+        self,
+        user_id: str,
+        query: str,
+        filters: Optional[dict] = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Search files using BM25/full-text search (keyword matching).
+
+        Uses PostgreSQL's tsvector and ts_rank for fast keyword-based search.
+
+        Args:
+            user_id: The user's ID
+            query: Search query string
+            filters: Optional filters (mime_type, name, modified_after, modified_before)
+            limit: Max results to return
+
+        Returns:
+            List of matching files with BM25 rank scores
+        """
+        words = query.lower().split()
+        if not words:
+            return []
+
+        tsquery = func.plainto_tsquery("english", query)
+
+        query_stmt = (
+            select(
+                GdriveCache,
+                func.ts_rank(GdriveCache.search_vector, tsquery).label("rank")
+            )
+            .where(GdriveCache.user_id == uuid.UUID(user_id))
+            .where(GdriveCache.search_vector.op("@@")(tsquery))
+        )
+
+        # Apply metadata filters (same as vector search)
+        if filters:
+            if filters.get("mime_type"):
+                query_stmt = query_stmt.where(
+                    GdriveCache.mime_type.ilike(f"%{filters['mime_type']}%")
+                )
+            if filters.get("name"):
+                query_stmt = query_stmt.where(
+                    GdriveCache.name.ilike(f"%{filters['name']}%")
+                )
+            if filters.get("modified_after"):
+                query_stmt = query_stmt.where(
+                    GdriveCache.modified_at >= filters["modified_after"]
+                )
+            if filters.get("modified_before"):
+                query_stmt = query_stmt.where(
+                    GdriveCache.modified_at <= filters["modified_before"]
+                )
+
+        query_stmt = (
+            query_stmt
+            .order_by(func.ts_rank(GdriveCache.search_vector, tsquery).desc())
+            .limit(limit)
+        )
+
+        result = await self.db.execute(query_stmt)
+        rows = result.all()
+
+        files = []
+        for row in rows:
+            file = row[0]
+            rank = float(row[1]) if row[1] is not None else 0
+
+            files.append({
+                "id": str(file.file_id),
+                "name": file.name,
+                "mime_type": file.mime_type,
+                "content_preview": file.content_preview,
+                "web_link": file.web_link,
+                "modified_at": file.modified_at.isoformat() if file.modified_at else None,
+                "owners": file.owners,
+                "bm25_rank": round(rank, 4),
+            })
+
+        return files
 
     async def get_file(self, user_id: str, file_id: str) -> Optional[dict]:
         """Get full file metadata and content preview.

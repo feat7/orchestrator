@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Workspace</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -372,7 +373,61 @@
         }
 
         .message-body p {
-            margin: 0;
+            margin: 0 0 12px 0;
+        }
+
+        .message-body p:last-child {
+            margin-bottom: 0;
+        }
+
+        .message-body ul, .message-body ol {
+            margin: 0 0 12px 0;
+            padding-left: 20px;
+        }
+
+        .message-body li {
+            margin-bottom: 4px;
+        }
+
+        .message-body code {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: ui-monospace, monospace;
+        }
+
+        .message-body pre {
+            background: var(--bg-tertiary);
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 0 0 12px 0;
+        }
+
+        .message-body pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .message-body strong {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .message-body h1, .message-body h2, .message-body h3 {
+            color: var(--text-primary);
+            margin: 16px 0 8px 0;
+        }
+
+        .message-body h1:first-child, .message-body h2:first-child, .message-body h3:first-child {
+            margin-top: 0;
+        }
+
+        .message-body hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 16px 0;
         }
 
         /* Status trace */
@@ -784,7 +839,7 @@
                             <div class="card-title">Search emails</div>
                             <div class="card-desc">Find emails about budget</div>
                         </div>
-                        <div class="card" onclick="sendSuggestion('What\\'s on my calendar this week?')">
+                        <div class="card" onclick="sendSuggestion('What is on my calendar this week?')">
                             <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                             <div class="card-title">Check calendar</div>
                             <div class="card-desc">What's on this week?</div>
@@ -842,6 +897,12 @@
         let convId = null;
         let processing = false;
         let email = '';
+
+        // Configure marked to convert single newlines to <br>
+        marked.setOptions({
+            breaks: true,
+            gfm: true
+        });
 
         document.addEventListener('DOMContentLoaded', () => {
             checkAuth();
@@ -1033,12 +1094,7 @@
                     <div class="message-avatar">AI</div>
                     <span class="message-name">Assistant</span>
                 </div>
-                <div class="trace">
-                    <div class="trace-item" data-s="init">
-                        <div class="trace-icon"><div class="spinner"></div></div>
-                        <span>Processing...</span>
-                    </div>
-                </div>
+                <div class="trace"></div>
                 <div class="message-body"><p class="response-text"></p></div>
                 <div class="message-footer" style="display:none"></div>
             `;
@@ -1086,6 +1142,16 @@
         function finalize(id, actions, latency) {
             const el = document.getElementById(id);
             if (!el) return;
+
+            // Parse markdown in response
+            const r = el.querySelector('.response-text');
+            if (r && r.textContent) {
+                const body = el.querySelector('.message-body');
+                if (body) {
+                    body.innerHTML = marked.parse(r.textContent);
+                }
+            }
+
             const f = el.querySelector('.message-footer');
             if (f && actions) {
                 const s = actions.filter(a => a.success).length;

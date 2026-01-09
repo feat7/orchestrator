@@ -43,6 +43,18 @@ RULES:
    - "today" = current day
 5. For ambiguous queries, provide your best interpretation and set confidence lower
 
+IMPORTANT - EMAIL SENDING REQUIRES CONFIRMATION:
+When the user wants to send an email, ALWAYS use "draft_email" step FIRST (never "send_email" directly).
+The system will show the draft to the user for review and ask for confirmation before sending.
+Only use "send_email" step when user explicitly confirms (e.g., "yes send it", "looks good, send", "confirmed").
+
+IMPORTANT - RECIPIENT RESOLUTION:
+When the user wants to send/draft an email to a PERSON'S NAME (not an email address with @):
+- ALWAYS add "search_gmail" as the FIRST step to find their email address from past emails
+- Set "recipient_needs_resolution": true in entities
+- Set "recipient_name": "<the person's name>" in entities
+- The system will search for emails from/to that person and resolve the email address
+
 EXAMPLES:
 
 Query: "What's on my calendar next week?"
@@ -81,6 +93,80 @@ Query: "Find emails from sarah@company.com about the budget"
   "confidence": 0.95
 }
 
+Query: "Send an email to Vinay telling him I'm waiting for the product launch"
+{
+  "services": ["gmail"],
+  "operation": "draft",
+  "entities": {
+    "recipient_name": "Vinay",
+    "recipient_needs_resolution": true,
+    "message": "waiting for the product launch"
+  },
+  "steps": ["search_gmail", "draft_email"],
+  "confidence": 0.9
+}
+
+Query: "Draft email to john@acme.com about the project update"
+{
+  "services": ["gmail"],
+  "operation": "draft",
+  "entities": {"recipient": "john@acme.com", "topic": "project update"},
+  "steps": ["draft_email"],
+  "confidence": 0.95
+}
+
+IMPORTANT - FOLLOW-UP EMAIL ADDRESS:
+When the conversation context shows the assistant asked for an email address, and the user responds with just an email address:
+- This is the user providing the recipient email for the previous send/draft request
+- Set "recipient": "<the email address>" in entities
+- Use "draft_email" step (create draft for review, NOT send directly)
+- The message content should be inferred from the previous conversation context
+
+Example conversation context:
+User: "send email to vinay about the product launch"
+Assistant: "I couldn't find an email for Vinay. Could you provide their email address?"
+User: "vinay@example.com"
+
+For the follow-up "vinay@example.com":
+{
+  "services": ["gmail"],
+  "operation": "draft",
+  "entities": {"recipient": "vinay@example.com", "message": "product launch"},
+  "steps": ["draft_email"],
+  "confidence": 0.95
+}
+
+IMPORTANT - SEND CONFIRMATION:
+When user confirms they want to send a draft (e.g., "yes", "send it", "looks good", "confirmed"):
+- Check conversation context for a pending draft email
+- Use "send_email" step
+- Set "confirmed_send": true in entities
+- CRITICAL: Extract the draft details from the assistant's previous response and include them in entities:
+  - "draft_id": the draft ID (shown as **Draft ID:** in the response) - THIS IS REQUIRED
+  - "to": the recipient email address
+  - "subject": the email subject line
+  - "body": the full email body content
+
+Example conversation context:
+User: "send email to vinay about product launch"
+Assistant: "I've drafted an email... **To:** vinay@example.com **Subject:** Product Launch **Draft ID:** draft_abc123 Hi Vinay, I wanted to reach out... Best regards ---"
+User: "yes send it"
+
+For the confirmation "yes send it", extract details from the draft shown above:
+{
+  "services": ["gmail"],
+  "operation": "send",
+  "entities": {
+    "confirmed_send": true,
+    "draft_id": "draft_abc123",
+    "to": "vinay@example.com",
+    "subject": "Product Launch",
+    "body": "Hi Vinay,\n\nI wanted to reach out...\n\nBest regards"
+  },
+  "steps": ["send_email"],
+  "confidence": 0.95
+}
+
 Return ONLY valid JSON with this exact structure:
 {
   "services": ["gmail", "gcal", "gdrive"],
@@ -116,10 +202,26 @@ class IntentClassifier:
         prompt = f"User query: {query}"
 
         if conversation_context:
-            context_str = "\n".join(
-                f"- Previous query: {msg.get('query', '')}" for msg in conversation_context[-3:]
+            context_parts = []
+            # Check if this might be a send confirmation (short query like "yes", "send", etc.)
+            is_potential_confirmation = len(query.split()) <= 5 and any(
+                word in query.lower() for word in ["yes", "send", "confirm", "ok", "sure", "go ahead", "do it"]
             )
-            prompt = f"Recent conversation context:\n{context_str}\n\n{prompt}"
+            for msg in conversation_context[-3:]:
+                user_q = msg.get('query', '')
+                ai_resp = msg.get('response', '')
+                if user_q:
+                    context_parts.append(f"User: {user_q}")
+                if ai_resp:
+                    # Don't truncate if this might be a send confirmation - we need the full draft
+                    if is_potential_confirmation:
+                        context_parts.append(f"Assistant: {ai_resp}")
+                    else:
+                        # Truncate long responses for other cases
+                        truncated = ai_resp[:200] + "..." if len(ai_resp) > 200 else ai_resp
+                        context_parts.append(f"Assistant: {truncated}")
+            if context_parts:
+                prompt = f"Recent conversation:\n{chr(10).join(context_parts)}\n\nCurrent {prompt}"
 
         prompt += "\n\nClassify this query and return JSON:"
 
@@ -178,6 +280,8 @@ class IntentClassifier:
         Returns:
             A validated ParsedIntent object
         """
+        entities = data.get("entities", {})
+
         # Map service strings to enum values
         services = []
         for s in data.get("services", []):
@@ -202,10 +306,24 @@ class IntentClassifier:
         if not steps:
             steps = [StepType.SEARCH_GMAIL]
 
+        # Post-processing: Ensure recipient resolution works correctly
+        # If recipient_needs_resolution is set, ensure search_gmail is first
+        if entities.get("recipient_needs_resolution"):
+            if StepType.SEARCH_GMAIL not in steps:
+                steps.insert(0, StepType.SEARCH_GMAIL)
+            elif steps[0] != StepType.SEARCH_GMAIL:
+                # Move search_gmail to front
+                steps.remove(StepType.SEARCH_GMAIL)
+                steps.insert(0, StepType.SEARCH_GMAIL)
+
+            # Ensure gmail service is included
+            if ServiceType.GMAIL not in services:
+                services.append(ServiceType.GMAIL)
+
         return ParsedIntent(
             services=services,
             operation=data.get("operation", "search"),
-            entities=data.get("entities", {}),
+            entities=entities,
             steps=steps,
             confidence=data.get("confidence", 0.8),
         )
