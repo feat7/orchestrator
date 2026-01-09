@@ -255,6 +255,36 @@ Generate the email subject and body."""
                     continue
         return {}
 
+    async def _apply_modification(self, body: str, instruction: str) -> str:
+        """Apply a modification to the email body using LLM.
+
+        Args:
+            body: The original email body
+            instruction: The modification instruction (e.g., "add 'John' after 'Thanks'")
+
+        Returns:
+            The modified email body
+        """
+        if not self.llm:
+            # Fallback: just return original body
+            return body
+
+        prompt = f"""Apply this modification to the email body.
+
+MODIFICATION REQUEST: {instruction}
+
+ORIGINAL EMAIL BODY:
+{body}
+
+Apply the modification and return ONLY the modified email body text. Do not add any explanation or formatting - just the modified email content."""
+
+        try:
+            response = await self.llm.complete(prompt=prompt)
+            return response.strip()
+        except Exception as e:
+            print(f"Modification error: {e}")
+            return body
+
     async def execute(
         self, step: StepType, params: dict, user_id: str
     ) -> StepResult:
@@ -330,8 +360,28 @@ Generate the email subject and body."""
                 to = params.get("to", "")
                 subject = params.get("subject", "")
                 body = params.get("body", "")
+                modification = params.get("modification_instruction", "")
 
-                # If we have a draft_id, send the draft directly (removes it from drafts)
+                # Check if there's a modification request
+                if modification and body:
+                    # Apply modification using LLM
+                    body = await self._apply_modification(body, modification)
+                    # Send modified email directly (can't use send_draft since content changed)
+                    # Note: The old draft will remain in Gmail - user can delete it manually
+                    if not to:
+                        return StepResult(
+                            step=step,
+                            success=False,
+                            error="Recipient email address is required.",
+                        )
+                    sent = await self.gmail.send_email(
+                        user_id=user_id, to=to, subject=subject, body=body
+                    )
+                    sent["to"] = to
+                    sent["subject"] = subject
+                    return StepResult(step=step, success=True, data=sent)
+
+                # If we have a draft_id (no modification), send the draft directly (removes it from drafts)
                 if draft_id:
                     sent = await self.gmail.send_draft(user_id=user_id, draft_id=draft_id)
                     sent["to"] = to

@@ -113,6 +113,11 @@ class ResponseSynthesizer:
         Returns:
             A natural language response string
         """
+        # Check if this is a sent email result - show success message
+        sent_result = self._extract_sent_result(results)
+        if sent_result:
+            return self._format_sent_response(sent_result)
+
         # Check if this is a draft email result - format it ourselves for consistency
         draft_result = self._extract_draft_result(results)
         if draft_result:
@@ -153,6 +158,8 @@ Generate a helpful, natural response. If the user is asking about previous resul
     def _extract_draft_result(self, results: list[StepResult]) -> dict | None:
         """Extract draft email data from results if present.
 
+        Only returns draft data if it's actually a draft (not a sent email).
+
         Args:
             results: List of step results
 
@@ -161,6 +168,23 @@ Generate a helpful, natural response. If the user is asking about previous resul
         """
         for r in results:
             if r.success and r.data and "draft_id" in r.data:
+                # Check if this is actually a draft (not sent)
+                # Sent emails have "status": "sent"
+                if r.data.get("status") != "sent":
+                    return r.data
+        return None
+
+    def _extract_sent_result(self, results: list[StepResult]) -> dict | None:
+        """Extract sent email data from results if present.
+
+        Args:
+            results: List of step results
+
+        Returns:
+            Sent email data dict if found, None otherwise
+        """
+        for r in results:
+            if r.success and r.data and r.data.get("status") == "sent":
                 return r.data
         return None
 
@@ -191,6 +215,27 @@ Generate a helpful, natural response. If the user is asking about previous resul
 This draft is saved in your Gmail. You can edit it here or directly in your mailbox.
 
 Would you like me to send it? Reply 'yes' to send, or let me know what changes you'd like."""
+
+        return response
+
+    def _format_sent_response(self, sent: dict) -> str:
+        """Format a sent email response.
+
+        Args:
+            sent: Sent email data with to, subject, status
+
+        Returns:
+            Formatted success response string
+        """
+        to = sent.get("to", "")
+        subject = sent.get("subject", "")
+
+        response = f"""Done! Your email has been sent.
+
+**To:** {to}
+**Subject:** {subject}
+
+The email is now in your Sent folder."""
 
         return response
 

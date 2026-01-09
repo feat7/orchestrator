@@ -167,6 +167,39 @@ For the confirmation "yes send it", extract details from the draft shown above:
   "confidence": 0.95
 }
 
+IMPORTANT - MODIFY AND SEND:
+When user wants to modify the draft AND send it (e.g., "change the subject to X and send", "add my name after thanks and send it"):
+- This is NOT just a simple confirmation - it includes a modification request
+- Use "send_email" step
+- Set "confirmed_send": true in entities
+- Set "modification_instruction": "<what to modify>" in entities - describe the change clearly
+- CRITICAL: Extract the draft details from the assistant's previous response:
+  - "draft_id": the draft ID
+  - "to": the recipient email address
+  - "subject": the email subject line
+  - "body": the full email body content
+
+Example conversation context:
+User: "send email to vinay about product launch"
+Assistant: "I've drafted an email... **To:** vinay@example.com **Subject:** Product Launch **Draft ID:** draft_abc123 Hi Vinay, I wanted to reach out about the product launch... Thanks ---"
+User: "write my name John after thanks and send it"
+
+For the modify-and-send request:
+{
+  "services": ["gmail"],
+  "operation": "send",
+  "entities": {
+    "confirmed_send": true,
+    "modification_instruction": "Add 'John' after 'Thanks' in the closing",
+    "draft_id": "draft_abc123",
+    "to": "vinay@example.com",
+    "subject": "Product Launch",
+    "body": "Hi Vinay,\n\nI wanted to reach out about the product launch...\n\nThanks"
+  },
+  "steps": ["send_email"],
+  "confidence": 0.95
+}
+
 Return ONLY valid JSON with this exact structure:
 {
   "services": ["gmail", "gcal", "gdrive"],
@@ -203,9 +236,11 @@ class IntentClassifier:
 
         if conversation_context:
             context_parts = []
-            # Check if this might be a send confirmation (short query like "yes", "send", etc.)
-            is_potential_confirmation = len(query.split()) <= 5 and any(
-                word in query.lower() for word in ["yes", "send", "confirm", "ok", "sure", "go ahead", "do it"]
+            # Check if this might be a send confirmation or modify-and-send request
+            # For these, we need the full draft content from previous response
+            query_lower = query.lower()
+            is_potential_confirmation = any(
+                word in query_lower for word in ["yes", "send", "confirm", "ok", "sure", "go ahead", "do it"]
             )
             for msg in conversation_context[-3:]:
                 user_q = msg.get('query', '')
