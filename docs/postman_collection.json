@@ -1,0 +1,617 @@
+{
+  "info": {
+    "name": "Google Workspace Orchestrator API",
+    "description": "API collection for the Agentic Google Workspace Orchestrator. This collection contains all endpoints for query processing, sync operations, authentication, and health checks.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "gws-orchestrator-api",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "api_prefix",
+      "value": "/api/v1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Status",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check if the API service is healthy and connected to dependencies (database, redis)."
+          },
+          "response": [
+            {
+              "name": "Healthy Response",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/health",
+                  "host": ["{{base_url}}"],
+                  "path": ["health"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"healthy\",\n  \"database\": \"connected\",\n  \"redis\": \"connected\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Root Endpoint",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            },
+            "description": "Root endpoint with service information."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Query Processing",
+      "item": [
+        {
+          "name": "Process Query - Single Service (Calendar)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"What's on my calendar next week?\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/query",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["query"]
+            },
+            "description": "Search calendar for upcoming events."
+          },
+          "response": [
+            {
+              "name": "Calendar Search Response",
+              "originalRequest": {
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"What's on my calendar next week?\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}{{api_prefix}}/query",
+                  "host": ["{{base_url}}{{api_prefix}}"],
+                  "path": ["query"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"response\": \"Here's what's on your calendar next week:\\n- Monday 9:00 AM: Daily Standup\\n- Tuesday 2:00 PM: Acme Corp Quarterly Review\",\n  \"actions_taken\": [\n    {\n      \"step\": \"search_calendar\",\n      \"success\": true,\n      \"data\": {\n        \"results\": [\n          {\n            \"id\": \"event_123\",\n            \"title\": \"Daily Standup\",\n            \"start_time\": \"2024-11-11T09:00:00\"\n          }\n        ]\n      },\n      \"error\": null\n    }\n  ],\n  \"conversation_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"intent\": {\n    \"services\": [\"gcal\"],\n    \"operation\": \"search\",\n    \"entities\": {\"time_range\": \"next_week\"},\n    \"steps\": [\"search_calendar\"],\n    \"confidence\": 0.95\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Process Query - Single Service (Gmail)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Find emails from sarah@acme-corp.com about the budget\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/query",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["query"]
+            },
+            "description": "Search Gmail for emails matching sender and topic."
+          },
+          "response": []
+        },
+        {
+          "name": "Process Query - Single Service (Drive)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Show me PDFs in Drive from last month\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/query",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["query"]
+            },
+            "description": "Search Drive for PDF files from last month."
+          },
+          "response": []
+        },
+        {
+          "name": "Process Query - Multi-Service (Cancel Flight)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Cancel my Turkish Airlines flight\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/query",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["query"]
+            },
+            "description": "Multi-service query: Search Gmail for booking confirmation, find calendar event, draft cancellation email."
+          },
+          "response": [
+            {
+              "name": "Multi-Service Response",
+              "originalRequest": {
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"Cancel my Turkish Airlines flight\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}{{api_prefix}}/query",
+                  "host": ["{{base_url}}{{api_prefix}}"],
+                  "path": ["query"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"response\": \"I found your Turkish Airlines booking:\\n- Email: Turkish Airlines Flight Confirmation - TK1234 from reservations@turkishairlines.com\\n- Calendar: Istanbul → NYC Flight TK1234 on Nov 5 at 10:30 AM\\n\\nI've drafted a cancellation email. Would you like me to send it?\",\n  \"actions_taken\": [\n    {\n      \"step\": \"search_gmail\",\n      \"success\": true,\n      \"data\": {\"results\": [{\"id\": \"email_123\", \"subject\": \"Turkish Airlines Flight Confirmation - TK1234\"}]},\n      \"error\": null\n    },\n    {\n      \"step\": \"search_calendar\",\n      \"success\": true,\n      \"data\": {\"results\": [{\"id\": \"event_456\", \"title\": \"Istanbul → NYC Flight TK1234\"}]},\n      \"error\": null\n    },\n    {\n      \"step\": \"draft_email\",\n      \"success\": true,\n      \"data\": {\"draft_id\": \"draft_789\"},\n      \"error\": null\n    }\n  ],\n  \"conversation_id\": \"550e8400-e29b-41d4-a716-446655440001\",\n  \"intent\": {\n    \"services\": [\"gmail\", \"gcal\"],\n    \"operation\": \"update\",\n    \"entities\": {\"airline\": \"Turkish Airlines\", \"action\": \"cancel\"},\n    \"steps\": [\"search_gmail\", \"search_calendar\", \"draft_email\"],\n    \"confidence\": 0.9\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Process Query - Multi-Service (Meeting Prep)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Prepare for tomorrow's meeting with Acme Corp\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/query",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["query"]
+            },
+            "description": "Multi-service query: Search calendar for meeting, find related emails, pull Drive documents."
+          },
+          "response": []
+        },
+        {
+          "name": "Process Query - With Conversation Context",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Show me the latest one\",\n  \"conversation_id\": \"550e8400-e29b-41d4-a716-446655440000\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/query",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["query"]
+            },
+            "description": "Follow-up query using conversation context from a previous query."
+          },
+          "response": []
+        },
+        {
+          "name": "Process Query - Ambiguous (Move Meeting)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Move the meeting with John\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/query",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["query"]
+            },
+            "description": "Edge case: Ambiguous query that needs clarification."
+          },
+          "response": []
+        },
+        {
+          "name": "Process Query - Temporal (Next Tuesday)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"What meetings do I have next Tuesday?\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/query",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["query"]
+            },
+            "description": "Edge case: Temporal reasoning query."
+          },
+          "response": []
+        },
+        {
+          "name": "Process Query - Multiple Actions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Draft an email to john@company.com about the meeting and add it to my calendar for Friday at 2pm\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/query",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["query"]
+            },
+            "description": "Complex query with multiple write operations."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Sync Operations",
+      "item": [
+        {
+          "name": "Get Sync Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/sync/status",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["sync", "status"]
+            },
+            "description": "Get the current sync status for all Google services (Gmail, Calendar, Drive)."
+          },
+          "response": [
+            {
+              "name": "Sync Status Response",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}{{api_prefix}}/sync/status",
+                  "host": ["{{base_url}}{{api_prefix}}"],
+                  "path": ["sync", "status"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"gmail_last_sync\": \"2024-11-08T10:30:00\",\n  \"gmail_status\": \"completed\",\n  \"gcal_last_sync\": \"2024-11-08T10:30:00\",\n  \"gcal_status\": \"completed\",\n  \"gdrive_last_sync\": \"2024-11-08T10:25:00\",\n  \"gdrive_status\": \"completed\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Trigger Sync - All Services",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service\": \"all\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/sync/trigger",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["sync", "trigger"]
+            },
+            "description": "Trigger a manual sync for all Google services."
+          },
+          "response": [
+            {
+              "name": "Sync Triggered Response",
+              "originalRequest": {
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"service\": \"all\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}{{api_prefix}}/sync/trigger",
+                  "host": ["{{base_url}}{{api_prefix}}"],
+                  "path": ["sync", "trigger"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"sync_triggered\",\n  \"service\": \"all\",\n  \"message\": \"Sync triggered for all services. Check /sync/status for progress.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Trigger Sync - Gmail Only",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service\": \"gmail\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/sync/trigger",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["sync", "trigger"]
+            },
+            "description": "Trigger a manual sync for Gmail only."
+          },
+          "response": []
+        },
+        {
+          "name": "Trigger Sync - Calendar Only",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service\": \"gcal\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/sync/trigger",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["sync", "trigger"]
+            },
+            "description": "Trigger a manual sync for Google Calendar only."
+          },
+          "response": []
+        },
+        {
+          "name": "Trigger Sync - Drive Only",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service\": \"gdrive\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/sync/trigger",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["sync", "trigger"]
+            },
+            "description": "Trigger a manual sync for Google Drive only."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Get Auth Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/auth/status",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["auth", "status"]
+            },
+            "description": "Check if the current user is authenticated with Google."
+          },
+          "response": [
+            {
+              "name": "Unauthenticated",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}{{api_prefix}}/auth/status",
+                  "host": ["{{base_url}}{{api_prefix}}"],
+                  "path": ["auth", "status"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"authenticated\": false,\n  \"email\": null\n}"
+            },
+            {
+              "name": "Authenticated",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}{{api_prefix}}/auth/status",
+                  "host": ["{{base_url}}{{api_prefix}}"],
+                  "path": ["auth", "status"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"authenticated\": true,\n  \"email\": \"user@example.com\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Initiate Google OAuth Login",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/auth/login",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Redirect to Google OAuth consent screen. This endpoint redirects to Google for authentication."
+          },
+          "response": []
+        },
+        {
+          "name": "OAuth Callback",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/auth/callback?code=AUTH_CODE&state=STATE",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["auth", "callback"],
+              "query": [
+                {
+                  "key": "code",
+                  "value": "AUTH_CODE"
+                },
+                {
+                  "key": "state",
+                  "value": "STATE"
+                }
+              ]
+            },
+            "description": "OAuth callback endpoint. Google redirects here after user consent."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/auth/logout",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["auth", "logout"]
+            },
+            "description": "Log out the current user and clear session."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Test Endpoints",
+      "item": [
+        {
+          "name": "Test Intent Classification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Cancel my Turkish Airlines flight\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/test/classify",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["test", "classify"]
+            },
+            "description": "Test the intent classifier without executing the query."
+          },
+          "response": []
+        },
+        {
+          "name": "Test Embedding",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Turkish Airlines flight booking confirmation\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/test/embed",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["test", "embed"]
+            },
+            "description": "Test the embedding service with sample text."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

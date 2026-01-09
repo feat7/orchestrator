@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Workspace Orchestrator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .loader { border-top-color: #3b82f6; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">Google Workspace Orchestrator</h1>
+            <p class="text-gray-600 mt-2">Query your Gmail, Calendar, and Drive with natural language</p>
+        </header>
+
+        <!-- Auth Status -->
+        <div id="auth-section" class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Authentication</h2>
+            <div id="auth-status" class="flex items-center gap-4">
+                <span class="text-gray-500">Checking status...</span>
+            </div>
+        </div>
+
+        <!-- Test Panels (only visible when authenticated) -->
+        <div id="test-panels" class="hidden">
+            <!-- Sync Panel -->
+            <div class="bg-white rounded-lg shadow p-6 mb-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold">Data Sync</h3>
+                    <button onclick="refreshSyncStatus()" class="text-sm text-gray-500 hover:text-gray-700">
+                        Refresh Status
+                    </button>
+                </div>
+                <p class="text-sm text-gray-500 mb-4">Sync your Google data to enable semantic search. This pulls emails, events, and files and generates embeddings.</p>
+
+                <div class="grid md:grid-cols-4 gap-4 mb-4">
+                    <div id="gmail-sync-status" class="p-3 bg-gray-50 rounded">
+                        <div class="text-sm font-medium text-gray-700">Gmail</div>
+                        <div class="text-xs text-gray-500">Never synced</div>
+                    </div>
+                    <div id="gcal-sync-status" class="p-3 bg-gray-50 rounded">
+                        <div class="text-sm font-medium text-gray-700">Calendar</div>
+                        <div class="text-xs text-gray-500">Never synced</div>
+                    </div>
+                    <div id="gdrive-sync-status" class="p-3 bg-gray-50 rounded">
+                        <div class="text-sm font-medium text-gray-700">Drive</div>
+                        <div class="text-xs text-gray-500">Never synced</div>
+                    </div>
+                    <div class="flex items-center justify-center">
+                        <button onclick="triggerSync('all')" id="sync-all-btn"
+                                class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition">
+                            Sync All
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex gap-2">
+                    <button onclick="triggerSync('gmail')" class="text-sm px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200">
+                        Sync Gmail
+                    </button>
+                    <button onclick="triggerSync('gcal')" class="text-sm px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200">
+                        Sync Calendar
+                    </button>
+                    <button onclick="triggerSync('gdrive')" class="text-sm px-3 py-1 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200">
+                        Sync Drive
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-6 mb-6">
+                <!-- Gmail Panel -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <span class="text-red-500">
+                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/></svg>
+                        </span>
+                        Gmail
+                    </h3>
+                    <div class="space-y-3">
+                        <input type="text" id="gmail-query"
+                               class="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-red-500"
+                               placeholder="Search query (optional)">
+                        <button onclick="testGmail()"
+                                class="w-full bg-red-500 text-white py-2 rounded hover:bg-red-600 transition">
+                            Test Gmail API
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Calendar Panel -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <span class="text-blue-500">
+                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11zM9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm-8 4H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2z"/></svg>
+                        </span>
+                        Calendar
+                    </h3>
+                    <div class="space-y-3">
+                        <select id="calendar-range"
+                                class="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500">
+                            <option value="today">Today</option>
+                            <option value="tomorrow">Tomorrow</option>
+                            <option value="next_week" selected>Next Week</option>
+                        </select>
+                        <button onclick="testCalendar()"
+                                class="w-full bg-blue-500 text-white py-2 rounded hover:bg-blue-600 transition">
+                            Test Calendar API
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Drive Panel -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <span class="text-yellow-500">
+                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l4.58 6h11.13l4.57-6L14.88 3.5H7.71zm.58 1h6.42l5.58 9.5h-6.42L7.71 4.5H8.29zM3.27 15l5.15-8.5 3.07 5.25-2.58 4.25H3.27zm5.73 5l2-3.25L13 20H9zM13 17.75L11 14.5l3.07-5.25 5.2 8.5H13z"/></svg>
+                        </span>
+                        Drive
+                    </h3>
+                    <div class="space-y-3">
+                        <input type="text" id="drive-name"
+                               class="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-yellow-500"
+                               placeholder="File name filter (optional)">
+                        <button onclick="testDrive()"
+                                class="w-full bg-yellow-500 text-white py-2 rounded hover:bg-yellow-600 transition">
+                            Test Drive API
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Natural Language Query -->
+            <div class="bg-white rounded-lg shadow p-6 mb-6">
+                <h3 class="text-lg font-semibold mb-4">Natural Language Query</h3>
+                <div class="space-y-3">
+                    <textarea id="nl-query" rows="3"
+                              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500"
+                              placeholder="Try: 'What's on my calendar tomorrow?' or 'Find emails about budget from last week'"></textarea>
+                    <button onclick="testQuery()"
+                            class="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 transition">
+                        Send Query
+                    </button>
+                </div>
+            </div>
+
+            <!-- Results -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold">Results</h3>
+                    <button onclick="clearResults()" class="text-sm text-gray-500 hover:text-gray-700">Clear</button>
+                </div>
+                <div id="loading" class="hidden flex justify-center py-8">
+                    <div class="loader w-8 h-8 border-4 border-gray-200 rounded-full"></div>
+                </div>
+                <pre id="results" class="bg-gray-50 p-4 rounded-lg overflow-auto max-h-96 text-sm">
+Results will appear here...
+                </pre>
+            </div>
+        </div>
+
+        <!-- Not authenticated message -->
+        <div id="not-authenticated" class="hidden bg-white rounded-lg shadow p-8 text-center">
+            <div class="text-gray-400 mb-4">
+                <svg class="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                </svg>
+            </div>
+            <h3 class="text-xl font-semibold text-gray-700 mb-2">Authentication Required</h3>
+            <p class="text-gray-500 mb-4">Please connect your Google account to use the orchestrator.</p>
+            <a href="/api/v1/auth/login"
+               class="inline-block bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600 transition">
+                Connect Google Account
+            </a>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/v1';
+
+        function showLoading() {
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('results').classList.add('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('results').classList.remove('hidden');
+        }
+
+        function showResults(data) {
+            hideLoading();
+            document.getElementById('results').textContent = JSON.stringify(data, null, 2);
+        }
+
+        function clearResults() {
+            document.getElementById('results').textContent = 'Results will appear here...';
+        }
+
+        async function checkAuth() {
+            const authSection = document.getElementById('auth-status');
+            const testPanels = document.getElementById('test-panels');
+            const notAuthenticated = document.getElementById('not-authenticated');
+
+            try {
+                const response = await fetch(`${API_BASE}/auth/status`, {
+                    credentials: 'include'  // Include session cookie
+                });
+                const data = await response.json();
+
+                if (data.authenticated) {
+                    authSection.innerHTML = `
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                            Connected
+                        </span>
+                        <span class="text-gray-600">${data.email || ''}</span>
+                        <span class="text-sm text-gray-500">Mode: ${data.mode}</span>
+                        <button onclick="logout()" class="ml-auto text-sm text-red-500 hover:text-red-700">
+                            Logout
+                        </button>
+                    `;
+                    testPanels.classList.remove('hidden');
+                    notAuthenticated.classList.add('hidden');
+                } else {
+                    authSection.innerHTML = `
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+                            Not Connected
+                        </span>
+                        <a href="${API_BASE}/auth/login"
+                           class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition">
+                            Connect Google Account
+                        </a>
+                    `;
+                    testPanels.classList.add('hidden');
+                    notAuthenticated.classList.remove('hidden');
+                }
+            } catch (e) {
+                authSection.innerHTML = `
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                        Error
+                    </span>
+                    <span class="text-gray-600">${e.message}</span>
+                `;
+                testPanels.classList.add('hidden');
+                notAuthenticated.classList.remove('hidden');
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch(`${API_BASE}/auth/logout`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                checkAuth();
+            } catch (e) {
+                showResults({ error: e.message });
+            }
+        }
+
+        async function testGmail() {
+            showLoading();
+            try {
+                const query = document.getElementById('gmail-query').value;
+                const url = `${API_BASE}/test/gmail${query ? '?q=' + encodeURIComponent(query) : ''}`;
+                const response = await fetch(url, { credentials: 'include' });
+                const data = await response.json();
+                showResults(data);
+            } catch (e) {
+                showResults({ error: e.message });
+            }
+        }
+
+        async function testCalendar() {
+            showLoading();
+            try {
+                const timeRange = document.getElementById('calendar-range').value;
+                const url = `${API_BASE}/test/calendar?time_range=${timeRange}`;
+                const response = await fetch(url, { credentials: 'include' });
+                const data = await response.json();
+                showResults(data);
+            } catch (e) {
+                showResults({ error: e.message });
+            }
+        }
+
+        async function testDrive() {
+            showLoading();
+            try {
+                const name = document.getElementById('drive-name').value;
+                const url = `${API_BASE}/test/drive${name ? '?name=' + encodeURIComponent(name) : ''}`;
+                const response = await fetch(url, { credentials: 'include' });
+                const data = await response.json();
+                showResults(data);
+            } catch (e) {
+                showResults({ error: e.message });
+            }
+        }
+
+        async function testQuery() {
+            const query = document.getElementById('nl-query').value.trim();
+            if (!query) {
+                alert('Please enter a query');
+                return;
+            }
+
+            showLoading();
+            try {
+                const response = await fetch(`${API_BASE}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ query })
+                });
+                const data = await response.json();
+                showResults(data);
+            } catch (e) {
+                showResults({ error: e.message });
+            }
+        }
+
+        // Sync functions
+        async function triggerSync(service) {
+            showLoading();
+            try {
+                const response = await fetch(`${API_BASE}/sync/trigger`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ service })
+                });
+                const data = await response.json();
+                showResults(data);
+
+                // Refresh sync status after a short delay
+                setTimeout(refreshSyncStatus, 2000);
+            } catch (e) {
+                showResults({ error: e.message });
+            }
+        }
+
+        async function refreshSyncStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/sync/status`, {
+                    credentials: 'include'
+                });
+                const data = await response.json();
+
+                // Update Gmail status
+                const gmailEl = document.getElementById('gmail-sync-status');
+                updateSyncStatusElement(gmailEl, 'Gmail', data.gmail_status, data.gmail_last_sync);
+
+                // Update Calendar status
+                const gcalEl = document.getElementById('gcal-sync-status');
+                updateSyncStatusElement(gcalEl, 'Calendar', data.gcal_status, data.gcal_last_sync);
+
+                // Update Drive status
+                const gdriveEl = document.getElementById('gdrive-sync-status');
+                updateSyncStatusElement(gdriveEl, 'Drive', data.gdrive_status, data.gdrive_last_sync);
+
+            } catch (e) {
+                console.error('Error fetching sync status:', e);
+            }
+        }
+
+        function updateSyncStatusElement(el, name, status, lastSync) {
+            let statusColor = 'bg-gray-50';
+            let statusText = 'Never synced';
+
+            if (status === 'syncing') {
+                statusColor = 'bg-yellow-50';
+                statusText = 'Syncing...';
+            } else if (status === 'completed') {
+                statusColor = 'bg-green-50';
+                statusText = lastSync ? `Synced ${formatDate(lastSync)}` : 'Completed';
+            } else if (status === 'error') {
+                statusColor = 'bg-red-50';
+                statusText = 'Error';
+            }
+
+            el.className = `p-3 ${statusColor} rounded`;
+            el.innerHTML = `
+                <div class="text-sm font-medium text-gray-700">${name}</div>
+                <div class="text-xs text-gray-500">${statusText}</div>
+            `;
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            // Server returns UTC timestamps without 'Z' suffix, so we add it
+            const utcDateStr = dateStr.endsWith('Z') ? dateStr : dateStr + 'Z';
+            const date = new Date(utcDateStr);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+
+            if (diffMins < 0) return 'just now'; // Handle slight clock skew
+            if (diffMins < 1) return 'just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            const diffHours = Math.floor(diffMins / 60);
+            if (diffHours < 24) return `${diffHours}h ago`;
+            const diffDays = Math.floor(diffHours / 24);
+            return `${diffDays}d ago`;
+        }
+
+        // Check for auth success redirect
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('auth') === 'success') {
+            // Clear the URL parameter
+            window.history.replaceState({}, document.title, '/');
+        }
+
+        // Initial auth check
+        checkAuth();
+
+        // Also refresh sync status when authenticated
+        setTimeout(() => {
+            if (!document.getElementById('test-panels').classList.contains('hidden')) {
+                refreshSyncStatus();
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
