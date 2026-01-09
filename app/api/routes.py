@@ -286,6 +286,7 @@ async def _stream_query_response(
         from app.core.orchestrator import Orchestrator
         from app.core.intent import IntentClassifier
         from app.core.planner import QueryPlanner
+        from app.core.llm import get_llm
         from app.agents.gmail import GmailAgent
         from app.agents.gcal import GcalAgent
         from app.agents.gdrive import GdriveAgent
@@ -306,7 +307,9 @@ async def _stream_query_response(
             ServiceType.GDRIVE: GdriveAgent(drive_service, embedding_service),
         }
 
-        classifier = IntentClassifier(embedding_service)
+        # IntentClassifier needs LLM, not embedding service
+        llm = get_llm()
+        classifier = IntentClassifier(llm)
         planner = QueryPlanner()
         orchestrator = Orchestrator(classifier, planner, agents)
 
