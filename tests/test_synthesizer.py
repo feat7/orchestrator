@@ -169,7 +169,6 @@ async def test_synthesize_with_empty_results(mock_llm, simple_intent):
 @pytest.mark.asyncio
 async def test_synthesize_with_draft_created(mock_llm):
     """Test synthesizing response when draft is created."""
-    mock_llm.response = "I've drafted an email for you."
     synthesizer = ResponseSynthesizer(mock_llm)
 
     intent = ParsedIntent(
@@ -184,7 +183,7 @@ async def test_synthesize_with_draft_created(mock_llm):
         StepResult(
             step=StepType.DRAFT_EMAIL,
             success=True,
-            data={"draft_id": "draft123"},
+            data={"draft_id": "draft123", "to": "test@example.com", "subject": "Hello", "body": "Test body"},
         )
     ]
 
@@ -194,7 +193,11 @@ async def test_synthesize_with_draft_created(mock_llm):
         results=results,
     )
 
-    assert response == "I've drafted an email for you."
+    # Synthesizer now returns formatted draft response directly
+    assert "I've drafted an email for you" in response
+    assert "draft123" in response
+    assert "test@example.com" in response
+    assert "Would you like me to send it?" in response
 
 
 @pytest.mark.asyncio

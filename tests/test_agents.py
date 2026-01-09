@@ -23,13 +23,17 @@ class MockGmailService:
     def __init__(self):
         self.search_results = []
         self.get_result = None
-        self.draft_result = {"draft_id": "draft123"}
-        self.send_result = {"message_id": "msg456"}
+        self.draft_result = {"id": "draft123"}  # Agent uses "id" key
+        self.send_result = {"message_id": "msg456", "status": "sent"}
         self.search_calls = []
         self.get_calls = []
 
-    async def search_emails(self, user_id, embedding, filters=None, limit=10):
+    async def search_emails(self, user_id, embedding, filters=None, limit=10, similarity_threshold=0.25):
         self.search_calls.append({"user_id": user_id, "filters": filters, "limit": limit})
+        return self.search_results
+
+    async def search_emails_bm25(self, user_id, query, filters=None, limit=20):
+        """BM25/full-text search for hybrid search."""
         return self.search_results
 
     async def get_email(self, user_id, email_id):
@@ -42,6 +46,9 @@ class MockGmailService:
     async def send_email(self, user_id, to, subject, body):
         return self.send_result
 
+    async def send_draft(self, user_id, draft_id):
+        return {"id": "sent123", "status": "sent", "draft_id": draft_id}
+
 
 class MockCalendarService:
     """Mock Calendar service for testing."""
@@ -53,8 +60,12 @@ class MockCalendarService:
         self.update_result = {"event_id": "evt123", "updated": True}
         self.search_calls = []
 
-    async def search_events(self, user_id, embedding, filters=None, limit=10):
+    async def search_events(self, user_id, embedding, filters=None, limit=10, similarity_threshold=0.25):
         self.search_calls.append({"user_id": user_id, "filters": filters})
+        return self.search_results
+
+    async def search_events_bm25(self, user_id, query, filters=None, limit=20):
+        """BM25/full-text search for hybrid search."""
         return self.search_results
 
     async def get_event(self, user_id, event_id):
@@ -79,8 +90,12 @@ class MockDriveService:
         self.share_result = {"shared": True}
         self.search_calls = []
 
-    async def search_files(self, user_id, embedding, filters=None, limit=10):
+    async def search_files(self, user_id, embedding, filters=None, limit=10, similarity_threshold=0.25):
         self.search_calls.append({"user_id": user_id, "filters": filters})
+        return self.search_results
+
+    async def search_files_bm25(self, user_id, query, filters=None, limit=20):
+        """BM25/full-text search for hybrid search."""
         return self.search_results
 
     async def get_file(self, user_id, file_id):
@@ -111,7 +126,7 @@ def test_gmail_agent_initialization(gmail_agent):
 
 @pytest.mark.asyncio
 async def test_gmail_agent_search(gmail_agent):
-    """Test Gmail agent search."""
+    """Test Gmail agent search with hybrid (BM25 + vector + filtered) approach."""
     gmail_agent.gmail.search_results = [
         {"id": "msg1", "subject": "Test Email", "sender": "test@example.com"}
     ]
@@ -121,7 +136,8 @@ async def test_gmail_agent_search(gmail_agent):
 
     assert len(results) == 1
     assert results[0]["subject"] == "Test Email"
-    assert len(gmail_agent.gmail.search_calls) == 1
+    # Hybrid search makes multiple calls (BM25 + semantic + filtered)
+    assert len(gmail_agent.gmail.search_calls) >= 1
 
 
 @pytest.mark.asyncio

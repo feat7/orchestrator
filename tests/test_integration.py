@@ -49,7 +49,14 @@ class MockEmbeddingService:
 class MockGmailService:
     """Mock Gmail service for integration tests."""
 
-    async def search_emails(self, user_id, embedding, filters=None, limit=10):
+    async def search_emails(self, user_id, embedding, filters=None, limit=10, similarity_threshold=0.25):
+        return [
+            {"id": "msg1", "subject": "Team Meeting Notes", "sender": "colleague@example.com"},
+            {"id": "msg2", "subject": "Project Meeting Summary", "sender": "boss@example.com"},
+        ]
+
+    async def search_emails_bm25(self, user_id, query, filters=None, limit=20):
+        """BM25/full-text search for hybrid search."""
         return [
             {"id": "msg1", "subject": "Team Meeting Notes", "sender": "colleague@example.com"},
             {"id": "msg2", "subject": "Project Meeting Summary", "sender": "boss@example.com"},
@@ -59,16 +66,26 @@ class MockGmailService:
         return {"id": email_id, "subject": "Test Email", "body": "Email content"}
 
     async def create_draft(self, user_id, to, subject, body):
-        return {"draft_id": f"draft_{uuid4().hex[:8]}"}
+        return {"id": f"draft_{uuid4().hex[:8]}"}
 
     async def send_email(self, user_id, to, subject, body):
-        return {"message_id": f"msg_{uuid4().hex[:8]}"}
+        return {"message_id": f"msg_{uuid4().hex[:8]}", "status": "sent"}
+
+    async def send_draft(self, user_id, draft_id):
+        return {"id": f"sent_{uuid4().hex[:8]}", "status": "sent", "draft_id": draft_id}
 
 
 class MockCalendarService:
     """Mock Calendar service for integration tests."""
 
-    async def search_events(self, user_id, embedding, filters=None, limit=10):
+    async def search_events(self, user_id, embedding, filters=None, limit=10, similarity_threshold=0.25):
+        return [
+            {"id": "evt1", "title": "Team Standup", "start_time": "2024-01-15 09:00"},
+            {"id": "evt2", "title": "Project Review", "start_time": "2024-01-15 14:00"},
+        ]
+
+    async def search_events_bm25(self, user_id, query, filters=None, limit=20):
+        """BM25/full-text search for hybrid search."""
         return [
             {"id": "evt1", "title": "Team Standup", "start_time": "2024-01-15 09:00"},
             {"id": "evt2", "title": "Project Review", "start_time": "2024-01-15 14:00"},
@@ -90,7 +107,13 @@ class MockCalendarService:
 class MockDriveService:
     """Mock Drive service for integration tests."""
 
-    async def search_files(self, user_id, embedding, filters=None, limit=10):
+    async def search_files(self, user_id, embedding, filters=None, limit=10, similarity_threshold=0.25):
+        return [
+            {"id": "file1", "name": "Meeting Notes.docx", "mime_type": "application/vnd.google-apps.document"},
+        ]
+
+    async def search_files_bm25(self, user_id, query, filters=None, limit=20):
+        """BM25/full-text search for hybrid search."""
         return [
             {"id": "file1", "name": "Meeting Notes.docx", "mime_type": "application/vnd.google-apps.document"},
         ]
@@ -337,6 +360,9 @@ class TestErrorHandling:
 
         class FailingGmailService:
             async def search_emails(self, *args, **kwargs):
+                raise RuntimeError("Gmail API temporarily unavailable")
+
+            async def search_emails_bm25(self, *args, **kwargs):
                 raise RuntimeError("Gmail API temporarily unavailable")
 
         failing_agent = GmailAgent(FailingGmailService(), mock_embedding_service)
