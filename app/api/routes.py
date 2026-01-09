@@ -286,9 +286,9 @@ async def _stream_query_response(
         from app.core.orchestrator import Orchestrator
         from app.core.intent import IntentClassifier
         from app.core.planner import QueryPlanner
-        from app.agents.gmail_agent import GmailAgent
-        from app.agents.calendar_agent import CalendarAgent
-        from app.agents.drive_agent import DriveAgent
+        from app.agents.gmail import GmailAgent
+        from app.agents.gcal import GcalAgent
+        from app.agents.gdrive import GdriveAgent
         from app.schemas.intent import ServiceType
 
         # Get user credentials
@@ -302,8 +302,8 @@ async def _stream_query_response(
         # Create agents
         agents = {
             ServiceType.GMAIL: GmailAgent(gmail_service, embedding_service),
-            ServiceType.GCAL: CalendarAgent(calendar_service, embedding_service),
-            ServiceType.GDRIVE: DriveAgent(drive_service, embedding_service),
+            ServiceType.GCAL: GcalAgent(calendar_service, embedding_service),
+            ServiceType.GDRIVE: GdriveAgent(drive_service, embedding_service),
         }
 
         classifier = IntentClassifier(embedding_service)
