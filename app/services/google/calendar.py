@@ -41,10 +41,10 @@ class CalendarService:
         filters: Optional[dict] = None,
         limit: int = 10,
     ) -> list[dict]:
-        """Hybrid search: vector similarity + metadata filters.
+        """Search events using local cache with vector similarity.
 
-        For real API: Fetches from Calendar API with time filters.
-        For mock: Uses local pgvector search.
+        Always searches the local pgvector cache first (fast semantic search).
+        This uses embeddings generated during sync for semantic similarity ranking.
 
         Args:
             user_id: The user's ID
@@ -55,56 +55,7 @@ class CalendarService:
         Returns:
             List of matching events
         """
-        if not settings.use_mock_google and self.service:
-            try:
-                # Calculate time bounds
-                now = datetime.utcnow()
-                time_min = now
-                time_max = now + timedelta(days=30)  # Default: next 30 days
-
-                if filters:
-                    if filters.get("time_range") == "next_week":
-                        time_max = now + timedelta(days=7)
-                    elif filters.get("time_range") == "tomorrow":
-                        time_min = now.replace(hour=0, minute=0, second=0) + timedelta(days=1)
-                        time_max = time_min + timedelta(days=1)
-                    elif filters.get("time_range") == "today":
-                        time_min = now.replace(hour=0, minute=0, second=0)
-                        time_max = time_min + timedelta(days=1)
-                    if filters.get("date_from"):
-                        time_min = filters["date_from"]
-                    if filters.get("date_to"):
-                        time_max = filters["date_to"]
-
-                events_result = self.service.events().list(
-                    calendarId="primary",
-                    timeMin=time_min.isoformat() + "Z",
-                    timeMax=time_max.isoformat() + "Z",
-                    maxResults=limit,
-                    singleEvents=True,
-                    orderBy="startTime",
-                ).execute()
-
-                events = events_result.get("items", [])
-
-                return [
-                    {
-                        "id": e["id"],
-                        "title": e.get("summary", "Untitled Event"),
-                        "description": e.get("description", ""),
-                        "start_time": e["start"].get("dateTime", e["start"].get("date")),
-                        "end_time": e["end"].get("dateTime", e["end"].get("date")),
-                        "attendees": [a["email"] for a in e.get("attendees", [])],
-                        "location": e.get("location", ""),
-                        "meeting_link": e.get("hangoutLink", ""),
-                        "status": e.get("status", "confirmed"),
-                    }
-                    for e in events
-                ]
-            except Exception as e:
-                print(f"Calendar API error, falling back to cache: {e}")
-
-        # Mock mode or fallback: use local pgvector search
+        # Always use local pgvector search for speed and semantic matching
         query = select(GcalCache).where(
             GcalCache.user_id == uuid.UUID(user_id)
         )
@@ -117,7 +68,13 @@ class CalendarService:
                     GcalCache.start_time >= now,
                     GcalCache.start_time <= now + timedelta(days=7),
                 )
-            elif filters.get("time") == "tomorrow":
+            elif filters.get("time_range") == "this_week":
+                now = datetime.utcnow()
+                query = query.where(
+                    GcalCache.start_time >= now,
+                    GcalCache.start_time <= now + timedelta(days=7),
+                )
+            elif filters.get("time") == "tomorrow" or filters.get("time_range") == "tomorrow":
                 now = datetime.utcnow()
                 tomorrow_start = now.replace(hour=0, minute=0, second=0) + timedelta(days=1)
                 tomorrow_end = tomorrow_start + timedelta(days=1)
@@ -125,12 +82,20 @@ class CalendarService:
                     GcalCache.start_time >= tomorrow_start,
                     GcalCache.start_time < tomorrow_end,
                 )
+            elif filters.get("time_range") == "today":
+                now = datetime.utcnow()
+                today_start = now.replace(hour=0, minute=0, second=0)
+                today_end = today_start + timedelta(days=1)
+                query = query.where(
+                    GcalCache.start_time >= today_start,
+                    GcalCache.start_time < today_end,
+                )
             if filters.get("date_from"):
                 query = query.where(GcalCache.start_time >= filters["date_from"])
             if filters.get("date_to"):
                 query = query.where(GcalCache.end_time <= filters["date_to"])
 
-        # Order by vector similarity
+        # Order by vector similarity (cosine distance)
         query = query.order_by(
             GcalCache.embedding.cosine_distance(embedding)
         ).limit(limit)

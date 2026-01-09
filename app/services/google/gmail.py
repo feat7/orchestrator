@@ -43,10 +43,10 @@ class GmailService:
         filters: Optional[dict] = None,
         limit: int = 10,
     ) -> list[dict]:
-        """Hybrid search: vector similarity + metadata filters.
+        """Search emails using local cache with vector similarity.
 
-        For real API: First searches Gmail, then uses local embeddings for ranking.
-        For mock: Uses local pgvector search only.
+        Always searches the local pgvector cache first (fast semantic search).
+        This uses embeddings generated during sync for semantic similarity ranking.
 
         Args:
             user_id: The user's ID
@@ -57,58 +57,7 @@ class GmailService:
         Returns:
             List of matching emails
         """
-        if not settings.use_mock_google and self.service:
-            # Build Gmail search query
-            query_parts = []
-            if filters:
-                if filters.get("sender"):
-                    query_parts.append(f"from:{filters['sender']}")
-                if filters.get("date_from"):
-                    query_parts.append(f"after:{filters['date_from'].strftime('%Y/%m/%d')}")
-                if filters.get("date_to"):
-                    query_parts.append(f"before:{filters['date_to'].strftime('%Y/%m/%d')}")
-                if filters.get("subject"):
-                    query_parts.append(f"subject:{filters['subject']}")
-
-            gmail_query = " ".join(query_parts) if query_parts else None
-
-            try:
-                # Search Gmail
-                results = self.service.users().messages().list(
-                    userId="me",
-                    q=gmail_query,
-                    maxResults=limit,
-                ).execute()
-
-                messages = results.get("messages", [])
-                emails = []
-
-                for msg in messages:
-                    full_msg = self.service.users().messages().get(
-                        userId="me",
-                        id=msg["id"],
-                        format="metadata",
-                        metadataHeaders=["From", "Subject", "Date"],
-                    ).execute()
-
-                    headers = {h["name"]: h["value"] for h in full_msg.get("payload", {}).get("headers", [])}
-
-                    emails.append({
-                        "id": msg["id"],
-                        "subject": headers.get("Subject", "No Subject"),
-                        "sender": headers.get("From", "Unknown"),
-                        "body_preview": full_msg.get("snippet", ""),
-                        "received_at": headers.get("Date"),
-                        "labels": full_msg.get("labelIds", []),
-                        "has_attachments": False,  # Would need to check payload
-                    })
-
-                return emails
-            except Exception as e:
-                # Fall back to local cache on error
-                print(f"Gmail API error, falling back to cache: {e}")
-
-        # Mock mode or fallback: use local pgvector search
+        # Always use local pgvector search for speed and semantic matching
         query = select(GmailCache).where(
             GmailCache.user_id == uuid.UUID(user_id)
         )
@@ -123,8 +72,12 @@ class GmailService:
                 query = query.where(GmailCache.received_at >= filters["date_from"])
             if filters.get("date_to"):
                 query = query.where(GmailCache.received_at <= filters["date_to"])
+            if filters.get("subject"):
+                query = query.where(
+                    GmailCache.subject.ilike(f"%{filters['subject']}%")
+                )
 
-        # Order by vector similarity
+        # Order by vector similarity (cosine distance)
         query = query.order_by(
             GmailCache.embedding.cosine_distance(embedding)
         ).limit(limit)
