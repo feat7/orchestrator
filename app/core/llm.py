@@ -46,7 +46,7 @@ class OpenAIProvider(LLMProvider):
 
     def __init__(self):
         self.client = AsyncOpenAI(api_key=settings.openai_api_key)
-        self.model = "gpt-4-turbo-preview"
+        self.model = "gpt-4o-mini"  # Fast, cheap, non-thinking model
         self.embedding_model = settings.embedding_model
 
     async def complete(
@@ -84,7 +84,7 @@ class AnthropicProvider(LLMProvider):
 
     def __init__(self):
         self.client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-        self.model = "claude-3-sonnet-20240229"
+        self.model = "claude-haiku-4-5-20251001"  # Fast, cheap ($1/$5 per 1M tokens)
         # Use OpenAI for embeddings (Anthropic doesn't have embedding API)
         self.openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
         self.embedding_model = settings.embedding_model

@@ -340,22 +340,11 @@ async def _stream_query_response(
 
         plan = orchestrator.planner.create_plan(intent)
 
-        # Show the services we'll query
-        services_involved = list(set(s.service.value for s in plan.steps if hasattr(s.service, 'value')))
         service_names = {
             "gmail": "Gmail",
             "gcal": "Calendar",
             "gdrive": "Drive"
         }
-        service_display = [service_names.get(s, s) for s in services_involved]
-
-        if service_display:
-            yield sse_event("status", {
-                "message": f"Searching {', '.join(service_display)}...",
-                "step": 2,
-                "total_steps": 4,
-                "services": services_involved
-            })
 
         # Step 4: Execute plan with progress updates
         all_results = []

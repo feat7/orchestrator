@@ -3,509 +3,1175 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Google Workspace Orchestrator</title>
-    <!-- Tailwind CSS v3 from local file (fallback to CDNs) -->
-    <link rel="stylesheet" href="/static/tailwind.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/tailwindcss@3.4.1/dist/tailwind.min.css';">
+    <title>Workspace</title>
     <style>
-        /* Critical CSS fallback in case Tailwind doesn't load */
-        .loader { border-top-color: #3b82f6; animation: spin 1s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .message { animation: fadeIn 0.3s ease-out; }
-        .typing-indicator span { animation: bounce 1.4s infinite ease-in-out both; }
-        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
-        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
-        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
-        .chat-container { height: calc(100vh - 280px); min-height: 400px; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #111113;
+            --bg-secondary: #18181b;
+            --bg-tertiary: #1f1f23;
+            --bg-hover: #27272a;
+            --text-primary: #fafafa;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --border: #27272a;
+            --accent: #3b82f6;
+        }
+
+        body.light {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f4f4f5;
+            --bg-tertiary: #e4e4e7;
+            --bg-hover: #d4d4d8;
+            --text-primary: #18181b;
+            --text-secondary: #52525b;
+            --text-muted: #a1a1aa;
+            --border: #e4e4e7;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            font-size: 14px;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .app {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .new-chat {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            margin-top: 12px;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .new-chat:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+
+        .section-label {
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            padding: 8px 8px 12px;
+        }
+
+        .sidebar-footer {
+            padding: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .sync-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .sync-item {
+            flex: 1;
+            padding: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .sync-icon {
+            width: 16px;
+            height: 16px;
+            margin: 0 auto 4px;
+            color: var(--text-muted);
+        }
+
+        .sync-label {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .sync-btn {
+            width: 100%;
+            padding: 8px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .sync-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        /* Main */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .header {
+            height: 52px;
+            padding: 0 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .menu-btn {
+            display: none;
+            width: 32px;
+            height: 32px;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .menu-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .latency {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .icon-btn {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .icon-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .user-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 10px 4px 4px;
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .user-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .avatar {
+            width: 24px;
+            height: 24px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .user-email {
+            font-size: 13px;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .dropdown {
+            position: absolute;
+            top: 48px;
+            right: 20px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 4px;
+            min-width: 160px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            display: none;
+            z-index: 100;
+        }
+
+        .dropdown.show {
+            display: block;
+        }
+
+        .dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .dropdown-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .dropdown-item.danger:hover {
+            color: #ef4444;
+        }
+
+        /* Chat */
+        .chat {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .messages {
+            flex: 1;
+            max-width: 680px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 24px 20px;
+        }
+
+        .message {
+            margin-bottom: 24px;
+        }
+
+        .message.user {
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .message.user .message-bubble {
+            background: var(--accent);
+            color: white;
+            padding: 10px 14px;
+            border-radius: 16px 16px 4px 16px;
+            max-width: 70%;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .message-avatar {
+            width: 28px;
+            height: 28px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .message-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .message-body {
+            padding-left: 38px;
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .message-body p {
+            margin: 0;
+        }
+
+        /* Status trace */
+        .trace {
+            padding-left: 38px;
+            margin-bottom: 12px;
+        }
+
+        .trace-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .trace-item.done {
+            color: var(--text-secondary);
+        }
+
+        .trace-icon {
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .trace-icon svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .spinner {
+            width: 12px;
+            height: 12px;
+            border: 1.5px solid var(--border);
+            border-top-color: var(--text-muted);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .trace-tag {
+            font-size: 11px;
+            padding: 1px 6px;
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+            color: var(--text-muted);
+        }
+
+        .response-text {
+            white-space: pre-wrap;
+        }
+
+        .message-footer {
+            padding-left: 38px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            gap: 12px;
+        }
+
+        /* Welcome */
+        .welcome {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+
+        .welcome-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        .welcome-subtitle {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 32px;
+            text-align: center;
+            max-width: 400px;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        .card {
+            padding: 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .card:hover {
+            background: var(--bg-tertiary);
+            border-color: var(--text-muted);
+        }
+
+        .card-icon {
+            width: 20px;
+            height: 20px;
+            margin-bottom: 10px;
+            color: var(--text-muted);
+        }
+
+        .card-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .card-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Input */
+        .input-area {
+            padding: 16px 20px 20px;
+            background: linear-gradient(transparent, var(--bg-primary) 20%);
+        }
+
+        .input-wrap {
+            max-width: 680px;
+            margin: 0 auto;
+        }
+
+        .input-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            transition: border-color 0.15s;
+        }
+
+        .input-box:focus-within {
+            border-color: var(--text-muted);
+        }
+
+        .input-field {
+            flex: 1;
+            background: none;
+            border: none;
+            outline: none;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: inherit;
+            resize: none;
+            max-height: 150px;
+            line-height: 1.5;
+            padding: 0;
+            margin: 0;
+            vertical-align: middle;
+        }
+
+        .input-field::placeholder {
+            color: var(--text-muted);
+        }
+
+        .send-btn {
+            width: 32px;
+            height: 32px;
+            background: var(--accent);
+            border: none;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: opacity 0.15s;
+        }
+
+        .send-btn:hover {
+            opacity: 0.9;
+        }
+
+        .send-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .input-hint {
+            text-align: center;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 8px;
+        }
+
+        /* Auth */
+        .auth {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+
+        .auth-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            max-width: 360px;
+            width: 100%;
+        }
+
+        .auth-icon {
+            width: 48px;
+            height: 48px;
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            color: var(--text-muted);
+        }
+
+        .auth-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .auth-subtitle {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+
+        .google-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 20px;
+            background: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #1f1f1f;
+            cursor: pointer;
+            text-decoration: none;
+            transition: box-shadow 0.15s;
+        }
+
+        .google-btn:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        /* Mobile */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                transform: translateX(-100%);
+                z-index: 200;
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(0,0,0,0.5);
+                z-index: 199;
+                display: none;
+            }
+
+            .overlay.show {
+                display: block;
+            }
+
+            .menu-btn {
+                display: flex;
+            }
+
+            .cards {
+                grid-template-columns: 1fr;
+            }
+
+            .user-email {
+                display: none;
+            }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
-    <div class="container mx-auto px-4 py-6 max-w-4xl">
-        <!-- Header -->
-        <header class="mb-4">
-            <div class="flex items-center justify-between">
-                <div>
-                    <h1 class="text-2xl font-bold text-gray-800">Google Workspace Assistant</h1>
-                    <p class="text-gray-500 text-sm">Chat with your Gmail, Calendar, and Drive</p>
-                </div>
-                <div id="auth-status" class="flex items-center gap-3">
-                    <span class="text-gray-400 text-sm">Loading...</span>
-                </div>
-            </div>
-        </header>
+<body>
+    <div class="app">
+        <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
 
-        <!-- Settings Bar -->
-        <div id="settings-bar" class="hidden bg-white rounded-lg shadow-sm p-3 mb-4 flex items-center justify-between">
-            <div class="flex items-center gap-4">
-                <div id="sync-indicators" class="flex gap-2 text-xs">
-                    <span id="gmail-indicator" class="px-2 py-1 rounded bg-gray-100 text-gray-500">Gmail: --</span>
-                    <span id="gcal-indicator" class="px-2 py-1 rounded bg-gray-100 text-gray-500">Calendar: --</span>
-                    <span id="gdrive-indicator" class="px-2 py-1 rounded bg-gray-100 text-gray-500">Drive: --</span>
-                </div>
-                <button onclick="triggerSync('all')" class="text-xs px-3 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100">
-                    Sync All
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">Workspace</div>
+                <button class="new-chat" onclick="startNewChat()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    New chat
                 </button>
             </div>
-            <div id="metrics-display" class="text-xs text-gray-400">
-                <span id="latency-display"></span>
-            </div>
-        </div>
 
-        <!-- Chat Container -->
-        <div id="chat-section" class="hidden">
-            <div class="bg-white rounded-xl shadow-lg overflow-hidden">
-                <!-- Messages Area -->
-                <div id="messages" class="chat-container overflow-y-auto p-4 space-y-4 bg-gray-50">
-                    <!-- Welcome message -->
-                    <div class="message flex justify-start">
-                        <div class="max-w-[80%] bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
-                            <p class="text-gray-700">Hello! I'm your Google Workspace assistant. I can help you:</p>
-                            <ul class="mt-2 text-sm text-gray-600 space-y-1">
-                                <li>Search and manage your <strong>emails</strong></li>
-                                <li>Check and update your <strong>calendar</strong></li>
-                                <li>Find files in <strong>Google Drive</strong></li>
-                            </ul>
-                            <p class="mt-2 text-gray-700">Try asking something like:</p>
-                            <div class="mt-2 flex flex-wrap gap-2">
-                                <button onclick="sendSuggestion('What\\'s on my calendar this week?')"
-                                        class="text-xs px-3 py-1.5 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 transition">
-                                    What's on my calendar this week?
-                                </button>
-                                <button onclick="sendSuggestion('Find emails about budget')"
-                                        class="text-xs px-3 py-1.5 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 transition">
-                                    Find emails about budget
-                                </button>
-                                <button onclick="sendSuggestion('Show me recent PDFs in Drive')"
-                                        class="text-xs px-3 py-1.5 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 transition">
-                                    Show me recent PDFs in Drive
-                                </button>
-                            </div>
+            <div class="sidebar-content">
+                <div class="section-label">Recent</div>
+            </div>
+
+            <div class="sidebar-footer" id="sidebar-footer" style="display: none;">
+                <div class="sync-row">
+                    <div class="sync-item">
+                        <svg class="sync-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/></svg>
+                        <div class="sync-label" id="gmail-sync">--</div>
+                    </div>
+                    <div class="sync-item">
+                        <svg class="sync-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"/></svg>
+                        <div class="sync-label" id="gcal-sync">--</div>
+                    </div>
+                    <div class="sync-item">
+                        <svg class="sync-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
+                        <div class="sync-label" id="gdrive-sync">--</div>
+                    </div>
+                </div>
+                <button class="sync-btn" onclick="triggerSync('all')">Sync all</button>
+            </div>
+        </aside>
+
+        <main class="main">
+            <header class="header">
+                <div class="header-left">
+                    <button class="menu-btn" onclick="toggleSidebar()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
+                        </svg>
+                    </button>
+                    <span class="latency" id="latency"></span>
+                </div>
+
+                <div class="header-right">
+                    <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+                        </svg>
+                    </button>
+                    <button class="user-btn" id="user-btn" onclick="toggleDropdown()">
+                        <div class="avatar" id="avatar">?</div>
+                        <span class="user-email" id="user-email">Sign in</span>
+                    </button>
+                </div>
+
+                <div class="dropdown" id="dropdown">
+                    <div class="dropdown-item danger" onclick="logout()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                        </svg>
+                        Sign out
+                    </div>
+                </div>
+            </header>
+
+            <div class="chat" id="chat">
+                <div class="welcome" id="welcome">
+                    <h1 class="welcome-title">What can I help with?</h1>
+                    <p class="welcome-subtitle">Search your emails, check your calendar, or find files in Drive.</p>
+                    <div class="cards">
+                        <div class="card" onclick="sendSuggestion('Find emails about budget')">
+                            <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                            <div class="card-title">Search emails</div>
+                            <div class="card-desc">Find emails about budget</div>
+                        </div>
+                        <div class="card" onclick="sendSuggestion('What\\'s on my calendar this week?')">
+                            <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                            <div class="card-title">Check calendar</div>
+                            <div class="card-desc">What's on this week?</div>
+                        </div>
+                        <div class="card" onclick="sendSuggestion('Show me recent PDFs in Drive')">
+                            <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+                            <div class="card-title">Find files</div>
+                            <div class="card-desc">Recent PDFs in Drive</div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Input Area -->
-                <div class="border-t bg-white p-4">
-                    <form onsubmit="sendMessage(event)" class="flex gap-3">
-                        <input type="text" id="message-input"
-                               class="flex-1 px-4 py-3 border rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                               placeholder="Ask me anything about your Gmail, Calendar, or Drive..."
-                               autocomplete="off">
-                        <button type="submit" id="send-btn"
-                                class="px-6 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                <div class="messages" id="messages" style="display: none;"></div>
+            </div>
+
+            <div class="input-area" id="input-area" style="display: none;">
+                <div class="input-wrap">
+                    <form class="input-box" onsubmit="sendMessage(event)">
+                        <textarea id="input" class="input-field" placeholder="Ask about your emails, calendar, or files..." rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+                        <button type="submit" class="send-btn" id="send-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
                             </svg>
                         </button>
                     </form>
+                    <div class="input-hint">Enter to send, Shift+Enter for new line</div>
                 </div>
             </div>
-        </div>
 
-        <!-- Not authenticated message -->
-        <div id="not-authenticated" class="hidden bg-white rounded-xl shadow-lg p-12 text-center">
-            <div class="text-purple-400 mb-6">
-                <svg class="w-20 h-20 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
-                </svg>
+            <div class="auth" id="auth" style="display: none;">
+                <div class="auth-card">
+                    <div class="auth-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                        </svg>
+                    </div>
+                    <h2 class="auth-title">Connect your workspace</h2>
+                    <p class="auth-subtitle">Sign in with Google to search your emails, calendar, and Drive files.</p>
+                    <a href="/api/v1/auth/login" class="google-btn">
+                        <svg width="18" height="18" viewBox="0 0 24 24">
+                            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                        </svg>
+                        Continue with Google
+                    </a>
+                </div>
             </div>
-            <h3 class="text-2xl font-semibold text-gray-700 mb-3">Connect Your Google Account</h3>
-            <p class="text-gray-500 mb-6 max-w-md mx-auto">
-                To start chatting with your Google Workspace, please connect your Google account.
-                This allows me to search your emails, calendar, and files.
-            </p>
-            <a href="/api/v1/auth/login"
-               class="inline-flex items-center gap-2 bg-purple-600 text-white px-8 py-4 rounded-xl hover:bg-purple-700 transition text-lg font-medium">
-                <svg class="w-6 h-6" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                Connect Google Account
-            </a>
-        </div>
+        </main>
     </div>
 
     <script>
-        const API_BASE = '/api/v1';
-        let conversationId = null;
-        let isProcessing = false;
+        const API = '/api/v1';
+        let convId = null;
+        let processing = false;
+        let email = '';
 
-        // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             checkAuth();
+            const p = new URLSearchParams(location.search);
+            if (p.get('auth') === 'success') history.replaceState({}, '', '/');
 
-            // Check for auth success
-            const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.get('auth') === 'success') {
-                window.history.replaceState({}, document.title, '/');
-            }
+            document.addEventListener('click', e => {
+                if (!document.getElementById('user-btn').contains(e.target)) {
+                    document.getElementById('dropdown').classList.remove('show');
+                }
+            });
         });
+
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('overlay').classList.toggle('show');
+        }
+
+        function toggleDropdown() {
+            event.stopPropagation();
+            document.getElementById('dropdown').classList.toggle('show');
+        }
+
+        function toggleTheme() {
+            document.body.classList.toggle('light');
+        }
 
         async function checkAuth() {
             try {
-                const response = await fetch(`${API_BASE}/auth/status`, { credentials: 'include' });
-                const data = await response.json();
-
-                if (data.authenticated) {
-                    showAuthenticatedUI(data);
-                    refreshSyncStatus();
-                } else {
-                    showUnauthenticatedUI();
-                }
-            } catch (e) {
-                showUnauthenticatedUI();
-            }
+                const r = await fetch(`${API}/auth/status`, { credentials: 'include' });
+                const d = await r.json();
+                d.authenticated ? showAuth(d) : showUnauth();
+            } catch { showUnauth(); }
         }
 
-        function showAuthenticatedUI(data) {
-            document.getElementById('auth-status').innerHTML = `
-                <span class="text-sm text-gray-600">${data.email || 'Connected'}</span>
-                <button onclick="logout()" class="text-sm text-gray-400 hover:text-red-500">Logout</button>
-            `;
-            document.getElementById('settings-bar').classList.remove('hidden');
-            document.getElementById('chat-section').classList.remove('hidden');
-            document.getElementById('not-authenticated').classList.add('hidden');
+        function showAuth(d) {
+            email = d.email || 'User';
+            document.getElementById('avatar').textContent = email.substring(0, 2).toUpperCase();
+            document.getElementById('user-email').textContent = email;
+            document.getElementById('sidebar-footer').style.display = 'block';
+            document.getElementById('welcome').style.display = 'flex';
+            document.getElementById('input-area').style.display = 'block';
+            document.getElementById('auth').style.display = 'none';
+            refreshSync();
         }
 
-        function showUnauthenticatedUI() {
-            document.getElementById('auth-status').innerHTML = `
-                <a href="${API_BASE}/auth/login" class="text-sm text-purple-600 hover:text-purple-700">Connect Account</a>
-            `;
-            document.getElementById('settings-bar').classList.add('hidden');
-            document.getElementById('chat-section').classList.add('hidden');
-            document.getElementById('not-authenticated').classList.remove('hidden');
+        function showUnauth() {
+            document.getElementById('avatar').textContent = '?';
+            document.getElementById('user-email').textContent = 'Sign in';
+            document.getElementById('sidebar-footer').style.display = 'none';
+            document.getElementById('welcome').style.display = 'none';
+            document.getElementById('messages').style.display = 'none';
+            document.getElementById('input-area').style.display = 'none';
+            document.getElementById('auth').style.display = 'flex';
         }
 
         async function logout() {
-            await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' });
+            await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
             checkAuth();
         }
 
-        function sendSuggestion(text) {
-            document.getElementById('message-input').value = text;
+        function startNewChat() {
+            convId = null;
+            document.getElementById('messages').innerHTML = '';
+            document.getElementById('messages').style.display = 'none';
+            document.getElementById('welcome').style.display = 'flex';
+            toggleSidebar();
+        }
+
+        function sendSuggestion(t) {
+            document.getElementById('input').value = t;
             sendMessage(new Event('submit'));
+        }
+
+        function handleKey(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage(e);
+            }
+        }
+
+        function autoResize(el) {
+            el.style.height = 'auto';
+            el.style.height = Math.min(el.scrollHeight, 150) + 'px';
         }
 
         async function sendMessage(e) {
             e.preventDefault();
+            const input = document.getElementById('input');
+            const q = input.value.trim();
+            if (!q || processing) return;
 
-            const input = document.getElementById('message-input');
-            const query = input.value.trim();
-            if (!query || isProcessing) return;
-
-            isProcessing = true;
+            processing = true;
             input.value = '';
+            input.style.height = 'auto';
             document.getElementById('send-btn').disabled = true;
 
-            // Add user message
-            addMessage(query, 'user');
+            document.getElementById('welcome').style.display = 'none';
+            document.getElementById('messages').style.display = 'block';
 
-            // Add status indicator for streaming
-            const statusId = addStatusIndicator();
-
-            const startTime = performance.now();
+            addMsg(q, 'user');
+            const sid = addStatus();
 
             try {
-                // Use streaming endpoint
-                const response = await fetch(`${API_BASE}/query/stream`, {
+                const r = await fetch(`${API}/query/stream`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
-                    body: JSON.stringify({
-                        query,
-                        conversation_id: conversationId
-                    })
+                    body: JSON.stringify({ query: q, conversation_id: convId })
                 });
 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                if (!r.ok) throw new Error(r.status);
 
-                // Read the SSE stream
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
-                let finalData = null;
+                const reader = r.body.getReader();
+                const dec = new TextDecoder();
+                let buf = '', final = null, evtType = null;
 
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-
-                    // Process complete SSE events
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop(); // Keep incomplete line in buffer
-
-                    let eventType = null;
-                    let eventData = null;
+                    buf += dec.decode(value, { stream: true });
+                    const lines = buf.split('\n');
+                    buf = lines.pop();
 
                     for (const line of lines) {
-                        if (line.startsWith('event: ')) {
-                            eventType = line.slice(7);
-                        } else if (line.startsWith('data: ')) {
+                        if (line.startsWith('event: ')) evtType = line.slice(7);
+                        else if (line.startsWith('data: ')) {
                             try {
-                                eventData = JSON.parse(line.slice(6));
-
-                                // Handle different event types
-                                if (eventType === 'status') {
-                                    updateStatusIndicator(statusId, eventData.message);
-                                } else if (eventType === 'response_chunk') {
-                                    appendToStreamedResponse(statusId, eventData.text);
-                                } else if (eventType === 'done') {
-                                    finalData = eventData;
-                                } else if (eventType === 'error') {
-                                    throw new Error(eventData.message);
-                                }
-                            } catch (parseErr) {
-                                console.error('Parse error:', parseErr);
-                            }
+                                const d = JSON.parse(line.slice(6));
+                                if (evtType === 'status') updateStatus(sid, d.message);
+                                else if (evtType === 'response_chunk') appendResponse(sid, d.text);
+                                else if (evtType === 'done') final = d;
+                                else if (evtType === 'error') throw new Error(d.message);
+                            } catch {}
                         }
                     }
                 }
 
-                const endTime = performance.now();
-                const latency = finalData?.latency_ms || Math.round(endTime - startTime);
-
-                // Update latency display
-                updateLatencyDisplay(latency);
-
-                // Remove status indicator
-                removeTypingIndicator(statusId);
-
-                if (finalData) {
-                    // Store conversation ID
-                    if (finalData.conversation_id) {
-                        conversationId = finalData.conversation_id;
-                    }
-
-                    // Check if AI is asking clarifying questions
-                    if (finalData.needs_clarification) {
-                        addClarificationMessage(finalData.response, finalData.options);
+                if (final) {
+                    if (final.conversation_id) convId = final.conversation_id;
+                    if (final.needs_clarification) {
+                        removeEl(sid);
+                        addClarify(final.response, final.options);
                     } else {
-                        // Add AI response
-                        addMessage(finalData.response, 'assistant', finalData.actions_taken, latency);
+                        finalize(sid, final.actions_taken, final.latency_ms);
                     }
+                    document.getElementById('latency').textContent = final.latency_ms + 'ms';
                 }
-
             } catch (err) {
-                console.error('Stream error:', err);
-                removeTypingIndicator(statusId);
-                addMessage('Sorry, I encountered an error. Please try again.', 'assistant', null, null, true);
+                removeEl(sid);
+                addMsg('Something went wrong. Please try again.', 'assistant', true);
             }
 
-            isProcessing = false;
+            processing = false;
             document.getElementById('send-btn').disabled = false;
             input.focus();
         }
 
-        function addMessage(text, role, actions = null, latency = null, isError = false) {
-            const messages = document.getElementById('messages');
+        function addMsg(text, role, err = false) {
+            const m = document.getElementById('messages');
+            const d = document.createElement('div');
             const isUser = role === 'user';
 
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message flex ${isUser ? 'justify-end' : 'justify-start'}`;
-
-            let actionsHtml = '';
-            if (actions && actions.length > 0) {
-                const successCount = actions.filter(a => a.success).length;
-                const failCount = actions.filter(a => !a.success).length;
-                actionsHtml = `
-                    <div class="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-400">
-                        ${successCount > 0 ? `<span class="text-green-500">${successCount} action${successCount > 1 ? 's' : ''} completed</span>` : ''}
-                        ${failCount > 0 ? `<span class="text-red-500 ml-2">${failCount} failed</span>` : ''}
-                        ${latency ? `<span class="ml-2">${latency}ms</span>` : ''}
+            if (isUser) {
+                d.className = 'message user';
+                d.innerHTML = `<div class="message-bubble">${esc(text)}</div>`;
+            } else {
+                d.className = 'message';
+                d.innerHTML = `
+                    <div class="message-header">
+                        <div class="message-avatar">AI</div>
+                        <span class="message-name">Assistant</span>
                     </div>
+                    <div class="message-body" ${err ? 'style="color:#ef4444"' : ''}><p>${esc(text)}</p></div>
                 `;
             }
-
-            messageDiv.innerHTML = `
-                <div class="max-w-[80%] ${isUser
-                    ? 'bg-purple-600 text-white rounded-2xl rounded-tr-sm'
-                    : isError
-                        ? 'bg-red-50 text-red-700 rounded-2xl rounded-tl-sm border border-red-200'
-                        : 'bg-white rounded-2xl rounded-tl-sm shadow-sm'} px-4 py-3">
-                    <p class="${isUser ? '' : 'text-gray-700'} whitespace-pre-wrap">${escapeHtml(text)}</p>
-                    ${actionsHtml}
-                </div>
-            `;
-
-            messages.appendChild(messageDiv);
-            messages.scrollTop = messages.scrollHeight;
+            m.appendChild(d);
+            scrollBottom();
         }
 
-        function addClarificationMessage(text, options) {
-            const messages = document.getElementById('messages');
-
-            const messageDiv = document.createElement('div');
-            messageDiv.className = 'message flex justify-start';
-
-            let optionsHtml = '';
-            if (options && options.length > 0) {
-                optionsHtml = `
-                    <div class="mt-3 flex flex-wrap gap-2">
-                        ${options.map(opt => `
-                            <button onclick="sendSuggestion('${escapeHtml(opt)}')"
-                                    class="text-sm px-3 py-1.5 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 transition">
-                                ${escapeHtml(opt)}
-                            </button>
-                        `).join('')}
-                    </div>
-                `;
-            }
-
-            messageDiv.innerHTML = `
-                <div class="max-w-[80%] bg-amber-50 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-amber-200">
-                    <p class="text-gray-700 whitespace-pre-wrap">${escapeHtml(text)}</p>
-                    ${optionsHtml}
+        function addStatus() {
+            const m = document.getElementById('messages');
+            const id = 's' + Date.now();
+            const d = document.createElement('div');
+            d.className = 'message';
+            d.id = id;
+            d.innerHTML = `
+                <div class="message-header">
+                    <div class="message-avatar">AI</div>
+                    <span class="message-name">Assistant</span>
                 </div>
-            `;
-
-            messages.appendChild(messageDiv);
-            messages.scrollTop = messages.scrollHeight;
-        }
-
-        function addTypingIndicator() {
-            const messages = document.getElementById('messages');
-            const id = 'typing-' + Date.now();
-
-            const typingDiv = document.createElement('div');
-            typingDiv.id = id;
-            typingDiv.className = 'message flex justify-start';
-            typingDiv.innerHTML = `
-                <div class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
-                    <div class="typing-indicator flex gap-1">
-                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
-                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
-                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                <div class="trace">
+                    <div class="trace-item" data-s="init">
+                        <div class="trace-icon"><div class="spinner"></div></div>
+                        <span>Processing...</span>
                     </div>
                 </div>
+                <div class="message-body"><p class="response-text"></p></div>
+                <div class="message-footer" style="display:none"></div>
             `;
-
-            messages.appendChild(typingDiv);
-            messages.scrollTop = messages.scrollHeight;
+            m.appendChild(d);
+            scrollBottom();
             return id;
         }
 
-        function addStatusIndicator() {
-            const messages = document.getElementById('messages');
-            const id = 'status-' + Date.now();
+        function updateStatus(id, msg) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const trace = el.querySelector('.trace');
 
-            const statusDiv = document.createElement('div');
-            statusDiv.id = id;
-            statusDiv.className = 'message flex justify-start';
-            statusDiv.innerHTML = `
-                <div class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm min-w-[200px]">
-                    <div class="flex items-center gap-2">
-                        <div class="typing-indicator flex gap-1">
-                            <span class="w-2 h-2 bg-purple-400 rounded-full"></span>
-                            <span class="w-2 h-2 bg-purple-400 rounded-full"></span>
-                            <span class="w-2 h-2 bg-purple-400 rounded-full"></span>
-                        </div>
-                        <span class="status-text text-sm text-gray-500">Processing...</span>
-                    </div>
-                    <div class="streamed-response mt-2 text-gray-700 hidden"></div>
+            trace.querySelectorAll('.trace-item:not(.done)').forEach(t => {
+                t.classList.add('done');
+                t.querySelector('.trace-icon').innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
+            });
+
+            const item = document.createElement('div');
+            item.className = 'trace-item';
+            let tag = '';
+            if (msg.toLowerCase().includes('gmail') || msg.toLowerCase().includes('email')) tag = '<span class="trace-tag">Gmail</span>';
+            else if (msg.toLowerCase().includes('calendar')) tag = '<span class="trace-tag">Calendar</span>';
+            else if (msg.toLowerCase().includes('drive')) tag = '<span class="trace-tag">Drive</span>';
+
+            item.innerHTML = `<div class="trace-icon"><div class="spinner"></div></div><span>${esc(msg)}</span>${tag}`;
+            trace.appendChild(item);
+            scrollBottom();
+        }
+
+        function appendResponse(id, text) {
+            const el = document.getElementById(id);
+            if (!el) return;
+
+            el.querySelectorAll('.trace-item:not(.done)').forEach(t => {
+                t.classList.add('done');
+                t.querySelector('.trace-icon').innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
+            });
+
+            const r = el.querySelector('.response-text');
+            if (r) r.textContent += text;
+            scrollBottom();
+        }
+
+        function finalize(id, actions, latency) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const f = el.querySelector('.message-footer');
+            if (f && actions) {
+                const s = actions.filter(a => a.success).length;
+                const fail = actions.filter(a => !a.success).length;
+                let h = '';
+                if (s) h += `<span>${s} completed</span>`;
+                if (fail) h += `<span style="color:#ef4444">${fail} failed</span>`;
+                if (latency) h += `<span>${latency}ms</span>`;
+                f.innerHTML = h;
+                f.style.display = 'flex';
+            }
+            el.removeAttribute('id');
+        }
+
+        function addClarify(text, opts) {
+            const m = document.getElementById('messages');
+            const d = document.createElement('div');
+            d.className = 'message';
+            let btns = '';
+            if (opts?.length) btns = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${opts.map(o => `<button onclick="sendSuggestion('${esc(o)}')" style="padding:6px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-secondary);font-size:12px;cursor:pointer">${esc(o)}</button>`).join('')}</div>`;
+            d.innerHTML = `
+                <div class="message-header">
+                    <div class="message-avatar">AI</div>
+                    <span class="message-name">Assistant</span>
                 </div>
+                <div class="message-body"><p>${esc(text)}</p>${btns}</div>
             `;
-
-            messages.appendChild(statusDiv);
-            messages.scrollTop = messages.scrollHeight;
-            return id;
+            m.appendChild(d);
+            scrollBottom();
         }
 
-        function updateStatusIndicator(id, message) {
-            const el = document.getElementById(id);
-            if (el) {
-                const statusText = el.querySelector('.status-text');
-                if (statusText) statusText.textContent = message;
-                const messages = document.getElementById('messages');
-                messages.scrollTop = messages.scrollHeight;
-            }
-        }
-
-        function appendToStreamedResponse(id, text) {
-            const el = document.getElementById(id);
-            if (el) {
-                const responseDiv = el.querySelector('.streamed-response');
-                if (responseDiv) {
-                    responseDiv.classList.remove('hidden');
-                    responseDiv.textContent += text;
-                }
-                const messages = document.getElementById('messages');
-                messages.scrollTop = messages.scrollHeight;
-            }
-        }
-
-        function removeTypingIndicator(id) {
+        function removeEl(id) {
             const el = document.getElementById(id);
             if (el) el.remove();
         }
 
-        function updateLatencyDisplay(latency) {
-            const display = document.getElementById('latency-display');
-            const color = latency < 500 ? 'text-green-500' : latency < 2000 ? 'text-yellow-500' : 'text-red-500';
-            display.innerHTML = `Last query: <span class="${color}">${latency}ms</span>`;
+        function scrollBottom() {
+            const c = document.getElementById('chat');
+            c.scrollTop = c.scrollHeight;
         }
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+        function esc(t) {
+            const d = document.createElement('div');
+            d.textContent = t;
+            return d.innerHTML;
         }
 
-        // Sync functions
-        async function triggerSync(service) {
+        async function triggerSync(s) {
             try {
-                await fetch(`${API_BASE}/sync/trigger`, {
+                await fetch(`${API}/sync/trigger`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
-                    body: JSON.stringify({ service })
+                    body: JSON.stringify({ service: s })
                 });
-                setTimeout(refreshSyncStatus, 2000);
-            } catch (e) {
-                console.error('Sync error:', e);
-            }
+                setTimeout(refreshSync, 2000);
+            } catch {}
         }
 
-        async function refreshSyncStatus() {
+        async function refreshSync() {
             try {
-                const response = await fetch(`${API_BASE}/sync/status`, { credentials: 'include' });
-                const data = await response.json();
-
-                updateIndicator('gmail-indicator', 'Gmail', data.gmail_status, data.gmail_last_sync);
-                updateIndicator('gcal-indicator', 'Calendar', data.gcal_status, data.gcal_last_sync);
-                updateIndicator('gdrive-indicator', 'Drive', data.gdrive_status, data.gdrive_last_sync);
-            } catch (e) {
-                console.error('Status error:', e);
-            }
+                const r = await fetch(`${API}/sync/status`, { credentials: 'include' });
+                const d = await r.json();
+                updateSync('gmail-sync', d.gmail_status, d.gmail_last_sync);
+                updateSync('gcal-sync', d.gcal_status, d.gcal_last_sync);
+                updateSync('gdrive-sync', d.gdrive_status, d.gdrive_last_sync);
+            } catch {}
         }
 
-        function updateIndicator(id, name, status, lastSync) {
+        function updateSync(id, status, last) {
             const el = document.getElementById(id);
-            let bgColor = 'bg-gray-100 text-gray-500';
-            let text = '--';
-
-            if (status === 'syncing') {
-                bgColor = 'bg-yellow-100 text-yellow-700';
-                text = 'Syncing...';
-            } else if (status === 'completed') {
-                bgColor = 'bg-green-100 text-green-700';
-                text = formatRelativeTime(lastSync);
-            } else if (status === 'error') {
-                bgColor = 'bg-red-100 text-red-700';
-                text = 'Error';
-            }
-
-            el.className = `px-2 py-1 rounded ${bgColor}`;
-            el.textContent = `${name}: ${text}`;
+            if (!el) return;
+            if (status === 'syncing') el.textContent = 'Syncing...';
+            else if (status === 'completed') el.textContent = formatTime(last);
+            else if (status === 'error') el.textContent = 'Error';
+            else el.textContent = '--';
         }
 
-        function formatRelativeTime(dateStr) {
-            if (!dateStr) return '--';
-            const date = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
-            const diffMins = Math.floor((Date.now() - date) / 60000);
-            if (diffMins < 1) return 'now';
-            if (diffMins < 60) return `${diffMins}m`;
-            if (diffMins < 1440) return `${Math.floor(diffMins/60)}h`;
-            return `${Math.floor(diffMins/1440)}d`;
+        function formatTime(d) {
+            if (!d) return '--';
+            const date = new Date(d.endsWith('Z') ? d : d + 'Z');
+            const mins = Math.floor((Date.now() - date) / 60000);
+            if (mins < 1) return 'now';
+            if (mins < 60) return mins + 'm';
+            if (mins < 1440) return Math.floor(mins / 60) + 'h';
+            return Math.floor(mins / 1440) + 'd';
         }
     </script>
 </body>
