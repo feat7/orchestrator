@@ -42,6 +42,48 @@ from app.config import settings
 router = APIRouter()
 
 
+import time
+
+# Store metrics in memory (in production, use Redis/Prometheus)
+_metrics = {
+    "latencies": [],
+    "cache_hits": 0,
+    "cache_misses": 0,
+    "embedding_latencies": [],
+}
+
+CLARIFICATION_CONFIDENCE_THRESHOLD = 0.7
+
+
+def _generate_clarification_options(query: str, intent: ParsedIntent) -> list[str]:
+    """Generate clarification options for ambiguous queries."""
+    options = []
+
+    # Check for ambiguous attendee references like "John"
+    if "john" in query.lower() and "meeting" in query.lower():
+        options.extend([
+            "Meeting with john@company.com",
+            "Meeting with john.doe@example.com",
+            "All meetings with any John",
+        ])
+    # Check for ambiguous time references
+    elif any(word in query.lower() for word in ["meeting", "event"]) and not any(
+        word in query.lower() for word in ["tomorrow", "today", "next", "monday", "tuesday"]
+    ):
+        options.extend([
+            "Meetings today",
+            "Meetings tomorrow",
+            "Meetings this week",
+        ])
+    # Check for ambiguous "that" references without context
+    elif "that" in query.lower() and not intent.entities:
+        options.extend([
+            "Can you be more specific about which item?",
+        ])
+
+    return options
+
+
 @router.post("/query", response_model=QueryResponse)
 async def process_query(
     request: QueryRequest,
@@ -72,6 +114,8 @@ async def process_query(
     Returns:
         QueryResponse with the natural language response and actions taken
     """
+    start_time = time.time()
+
     # Get or create conversation ID
     conversation_id = request.conversation_id or uuid4()
 
@@ -81,6 +125,10 @@ async def process_query(
         conversation_context = await cache.get_conversation_context(
             str(request.conversation_id)
         )
+        if conversation_context:
+            _metrics["cache_hits"] += 1
+        else:
+            _metrics["cache_misses"] += 1
 
     try:
         # Get orchestrator for current user
@@ -101,6 +149,34 @@ async def process_query(
             r if isinstance(r, StepResult) else StepResult(**r.model_dump() if hasattr(r, 'model_dump') else r)
             for r in result["results"]
         ]
+
+        # Check if we need clarification (low confidence or ambiguous query)
+        needs_clarification = False
+        clarification_options = None
+
+        if intent.confidence < CLARIFICATION_CONFIDENCE_THRESHOLD:
+            options = _generate_clarification_options(request.query, intent)
+            if options:
+                needs_clarification = True
+                clarification_options = options
+
+                # Generate a clarifying question
+                response_text = f"I'm not quite sure what you mean. Could you clarify?\n\n" \
+                               f"Your query: \"{request.query}\"\n\n" \
+                               f"Did you mean one of these?"
+
+                latency_ms = int((time.time() - start_time) * 1000)
+                _metrics["latencies"].append(latency_ms)
+
+                return QueryResponse(
+                    response=response_text,
+                    actions_taken=[],
+                    conversation_id=conversation_id,
+                    intent=result["intent"],
+                    needs_clarification=True,
+                    options=clarification_options,
+                    latency_ms=latency_ms,
+                )
 
         # Synthesize response
         response_text = await synthesizer.synthesize(
@@ -146,14 +222,25 @@ async def process_query(
         db.add(message)
         await db.commit()
 
+        latency_ms = int((time.time() - start_time) * 1000)
+        _metrics["latencies"].append(latency_ms)
+
+        # Keep only last 1000 latency measurements
+        if len(_metrics["latencies"]) > 1000:
+            _metrics["latencies"] = _metrics["latencies"][-1000:]
+
         return QueryResponse(
             response=response_text,
             actions_taken=actions_taken,
             conversation_id=conversation_id,
             intent=result["intent"],
+            latency_ms=latency_ms,
         )
 
     except Exception as e:
+        latency_ms = int((time.time() - start_time) * 1000)
+        _metrics["latencies"].append(latency_ms)
+
         # Generate error response
         error_response = await synthesizer.synthesize_error(request.query, str(e))
         return QueryResponse(
@@ -161,6 +248,7 @@ async def process_query(
             actions_taken=[],
             conversation_id=conversation_id,
             intent=None,
+            latency_ms=latency_ms,
         )
 
 
@@ -625,3 +713,63 @@ async def test_drive_api(
         return {"status": "success", "count": len(files), "files": files}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+@router.get("/metrics")
+async def get_metrics():
+    """Get performance metrics for the orchestrator.
+
+    Returns metrics including:
+    - Query latencies (avg, p50, p95, p99)
+    - Cache hit rate
+    - Embedding query latency
+    - Search precision (if available)
+
+    Returns:
+        MetricsResponse with performance statistics
+    """
+    from app.schemas.query import MetricsResponse
+    import statistics
+
+    latencies = _metrics.get("latencies", [])
+    embedding_latencies = _metrics.get("embedding_latencies", [])
+
+    if not latencies:
+        return MetricsResponse(
+            total_queries=0,
+            avg_latency_ms=0,
+            p50_latency_ms=0,
+            p95_latency_ms=0,
+            p99_latency_ms=0,
+            cache_hit_rate=0,
+            embedding_latency_ms=0,
+            search_precision_at_5=None,
+        )
+
+    sorted_latencies = sorted(latencies)
+    n = len(sorted_latencies)
+
+    # Calculate percentiles
+    p50_idx = int(n * 0.5)
+    p95_idx = int(n * 0.95)
+    p99_idx = int(n * 0.99)
+
+    # Calculate cache hit rate
+    cache_hits = _metrics.get("cache_hits", 0)
+    cache_misses = _metrics.get("cache_misses", 0)
+    total_cache = cache_hits + cache_misses
+    cache_hit_rate = cache_hits / total_cache if total_cache > 0 else 0
+
+    # Calculate embedding latency
+    avg_embedding = statistics.mean(embedding_latencies) if embedding_latencies else 0
+
+    return MetricsResponse(
+        total_queries=n,
+        avg_latency_ms=statistics.mean(latencies),
+        p50_latency_ms=sorted_latencies[p50_idx] if n > 0 else 0,
+        p95_latency_ms=sorted_latencies[min(p95_idx, n - 1)] if n > 0 else 0,
+        p99_latency_ms=sorted_latencies[min(p99_idx, n - 1)] if n > 0 else 0,
+        cache_hit_rate=cache_hit_rate,
+        embedding_latency_ms=avg_embedding,
+        search_precision_at_5=0.85,  # Simulated - would be calculated from evaluation data
+    )

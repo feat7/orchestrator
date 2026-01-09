@@ -8,172 +8,113 @@
     <style>
         .loader { border-top-color: #3b82f6; animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .message { animation: fadeIn 0.3s ease-out; }
+        .typing-indicator span { animation: bounce 1.4s infinite ease-in-out both; }
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+        .chat-container { height: calc(100vh - 280px); min-height: 400px; }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <div class="container mx-auto px-4 py-8 max-w-6xl">
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-6 max-w-4xl">
         <!-- Header -->
-        <header class="mb-8">
-            <h1 class="text-3xl font-bold text-gray-800">Google Workspace Orchestrator</h1>
-            <p class="text-gray-600 mt-2">Query your Gmail, Calendar, and Drive with natural language</p>
+        <header class="mb-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">Google Workspace Assistant</h1>
+                    <p class="text-gray-500 text-sm">Chat with your Gmail, Calendar, and Drive</p>
+                </div>
+                <div id="auth-status" class="flex items-center gap-3">
+                    <span class="text-gray-400 text-sm">Loading...</span>
+                </div>
+            </div>
         </header>
 
-        <!-- Auth Status -->
-        <div id="auth-section" class="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 class="text-xl font-semibold mb-4">Authentication</h2>
-            <div id="auth-status" class="flex items-center gap-4">
-                <span class="text-gray-500">Checking status...</span>
+        <!-- Settings Bar -->
+        <div id="settings-bar" class="hidden bg-white rounded-lg shadow-sm p-3 mb-4 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <div id="sync-indicators" class="flex gap-2 text-xs">
+                    <span id="gmail-indicator" class="px-2 py-1 rounded bg-gray-100 text-gray-500">Gmail: --</span>
+                    <span id="gcal-indicator" class="px-2 py-1 rounded bg-gray-100 text-gray-500">Calendar: --</span>
+                    <span id="gdrive-indicator" class="px-2 py-1 rounded bg-gray-100 text-gray-500">Drive: --</span>
+                </div>
+                <button onclick="triggerSync('all')" class="text-xs px-3 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100">
+                    Sync All
+                </button>
+            </div>
+            <div id="metrics-display" class="text-xs text-gray-400">
+                <span id="latency-display"></span>
             </div>
         </div>
 
-        <!-- Test Panels (only visible when authenticated) -->
-        <div id="test-panels" class="hidden">
-            <!-- Sync Panel -->
-            <div class="bg-white rounded-lg shadow p-6 mb-6">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-semibold">Data Sync</h3>
-                    <button onclick="refreshSyncStatus()" class="text-sm text-gray-500 hover:text-gray-700">
-                        Refresh Status
-                    </button>
+        <!-- Chat Container -->
+        <div id="chat-section" class="hidden">
+            <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+                <!-- Messages Area -->
+                <div id="messages" class="chat-container overflow-y-auto p-4 space-y-4 bg-gray-50">
+                    <!-- Welcome message -->
+                    <div class="message flex justify-start">
+                        <div class="max-w-[80%] bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+                            <p class="text-gray-700">Hello! I'm your Google Workspace assistant. I can help you:</p>
+                            <ul class="mt-2 text-sm text-gray-600 space-y-1">
+                                <li>Search and manage your <strong>emails</strong></li>
+                                <li>Check and update your <strong>calendar</strong></li>
+                                <li>Find files in <strong>Google Drive</strong></li>
+                            </ul>
+                            <p class="mt-2 text-gray-700">Try asking something like:</p>
+                            <div class="mt-2 flex flex-wrap gap-2">
+                                <button onclick="sendSuggestion('What\\'s on my calendar this week?')"
+                                        class="text-xs px-3 py-1.5 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 transition">
+                                    What's on my calendar this week?
+                                </button>
+                                <button onclick="sendSuggestion('Find emails about budget')"
+                                        class="text-xs px-3 py-1.5 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 transition">
+                                    Find emails about budget
+                                </button>
+                                <button onclick="sendSuggestion('Show me recent PDFs in Drive')"
+                                        class="text-xs px-3 py-1.5 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 transition">
+                                    Show me recent PDFs in Drive
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <p class="text-sm text-gray-500 mb-4">Sync your Google data to enable semantic search. This pulls emails, events, and files and generates embeddings.</p>
 
-                <div class="grid md:grid-cols-4 gap-4 mb-4">
-                    <div id="gmail-sync-status" class="p-3 bg-gray-50 rounded">
-                        <div class="text-sm font-medium text-gray-700">Gmail</div>
-                        <div class="text-xs text-gray-500">Never synced</div>
-                    </div>
-                    <div id="gcal-sync-status" class="p-3 bg-gray-50 rounded">
-                        <div class="text-sm font-medium text-gray-700">Calendar</div>
-                        <div class="text-xs text-gray-500">Never synced</div>
-                    </div>
-                    <div id="gdrive-sync-status" class="p-3 bg-gray-50 rounded">
-                        <div class="text-sm font-medium text-gray-700">Drive</div>
-                        <div class="text-xs text-gray-500">Never synced</div>
-                    </div>
-                    <div class="flex items-center justify-center">
-                        <button onclick="triggerSync('all')" id="sync-all-btn"
-                                class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition">
-                            Sync All
+                <!-- Input Area -->
+                <div class="border-t bg-white p-4">
+                    <form onsubmit="sendMessage(event)" class="flex gap-3">
+                        <input type="text" id="message-input"
+                               class="flex-1 px-4 py-3 border rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                               placeholder="Ask me anything about your Gmail, Calendar, or Drive..."
+                               autocomplete="off">
+                        <button type="submit" id="send-btn"
+                                class="px-6 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                            </svg>
                         </button>
-                    </div>
+                    </form>
                 </div>
-
-                <div class="flex gap-2">
-                    <button onclick="triggerSync('gmail')" class="text-sm px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200">
-                        Sync Gmail
-                    </button>
-                    <button onclick="triggerSync('gcal')" class="text-sm px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200">
-                        Sync Calendar
-                    </button>
-                    <button onclick="triggerSync('gdrive')" class="text-sm px-3 py-1 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200">
-                        Sync Drive
-                    </button>
-                </div>
-            </div>
-
-            <div class="grid md:grid-cols-3 gap-6 mb-6">
-                <!-- Gmail Panel -->
-                <div class="bg-white rounded-lg shadow p-6">
-                    <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <span class="text-red-500">
-                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/></svg>
-                        </span>
-                        Gmail
-                    </h3>
-                    <div class="space-y-3">
-                        <input type="text" id="gmail-query"
-                               class="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-red-500"
-                               placeholder="Search query (optional)">
-                        <button onclick="testGmail()"
-                                class="w-full bg-red-500 text-white py-2 rounded hover:bg-red-600 transition">
-                            Test Gmail API
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Calendar Panel -->
-                <div class="bg-white rounded-lg shadow p-6">
-                    <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <span class="text-blue-500">
-                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11zM9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm-8 4H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2z"/></svg>
-                        </span>
-                        Calendar
-                    </h3>
-                    <div class="space-y-3">
-                        <select id="calendar-range"
-                                class="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500">
-                            <option value="today">Today</option>
-                            <option value="tomorrow">Tomorrow</option>
-                            <option value="next_week" selected>Next Week</option>
-                        </select>
-                        <button onclick="testCalendar()"
-                                class="w-full bg-blue-500 text-white py-2 rounded hover:bg-blue-600 transition">
-                            Test Calendar API
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Drive Panel -->
-                <div class="bg-white rounded-lg shadow p-6">
-                    <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <span class="text-yellow-500">
-                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l4.58 6h11.13l4.57-6L14.88 3.5H7.71zm.58 1h6.42l5.58 9.5h-6.42L7.71 4.5H8.29zM3.27 15l5.15-8.5 3.07 5.25-2.58 4.25H3.27zm5.73 5l2-3.25L13 20H9zM13 17.75L11 14.5l3.07-5.25 5.2 8.5H13z"/></svg>
-                        </span>
-                        Drive
-                    </h3>
-                    <div class="space-y-3">
-                        <input type="text" id="drive-name"
-                               class="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-yellow-500"
-                               placeholder="File name filter (optional)">
-                        <button onclick="testDrive()"
-                                class="w-full bg-yellow-500 text-white py-2 rounded hover:bg-yellow-600 transition">
-                            Test Drive API
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Natural Language Query -->
-            <div class="bg-white rounded-lg shadow p-6 mb-6">
-                <h3 class="text-lg font-semibold mb-4">Natural Language Query</h3>
-                <div class="space-y-3">
-                    <textarea id="nl-query" rows="3"
-                              class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500"
-                              placeholder="Try: 'What's on my calendar tomorrow?' or 'Find emails about budget from last week'"></textarea>
-                    <button onclick="testQuery()"
-                            class="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 transition">
-                        Send Query
-                    </button>
-                </div>
-            </div>
-
-            <!-- Results -->
-            <div class="bg-white rounded-lg shadow p-6">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-semibold">Results</h3>
-                    <button onclick="clearResults()" class="text-sm text-gray-500 hover:text-gray-700">Clear</button>
-                </div>
-                <div id="loading" class="hidden flex justify-center py-8">
-                    <div class="loader w-8 h-8 border-4 border-gray-200 rounded-full"></div>
-                </div>
-                <pre id="results" class="bg-gray-50 p-4 rounded-lg overflow-auto max-h-96 text-sm">
-Results will appear here...
-                </pre>
             </div>
         </div>
 
         <!-- Not authenticated message -->
-        <div id="not-authenticated" class="hidden bg-white rounded-lg shadow p-8 text-center">
-            <div class="text-gray-400 mb-4">
-                <svg class="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+        <div id="not-authenticated" class="hidden bg-white rounded-xl shadow-lg p-12 text-center">
+            <div class="text-purple-400 mb-6">
+                <svg class="w-20 h-20 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
                 </svg>
             </div>
-            <h3 class="text-xl font-semibold text-gray-700 mb-2">Authentication Required</h3>
-            <p class="text-gray-500 mb-4">Please connect your Google account to use the orchestrator.</p>
+            <h3 class="text-2xl font-semibold text-gray-700 mb-3">Connect Your Google Account</h3>
+            <p class="text-gray-500 mb-6 max-w-md mx-auto">
+                To start chatting with your Google Workspace, please connect your Google account.
+                This allows me to search your emails, calendar, and files.
+            </p>
             <a href="/api/v1/auth/login"
-               class="inline-block bg-blue-500 text-white px-6 py-3 rounded-lg hover:bg-blue-600 transition">
+               class="inline-flex items-center gap-2 bg-purple-600 text-white px-8 py-4 rounded-xl hover:bg-purple-700 transition text-lg font-medium">
+                <svg class="w-6 h-6" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
                 Connect Google Account
             </a>
         </div>
@@ -181,248 +122,290 @@ Results will appear here...
 
     <script>
         const API_BASE = '/api/v1';
+        let conversationId = null;
+        let isProcessing = false;
 
-        function showLoading() {
-            document.getElementById('loading').classList.remove('hidden');
-            document.getElementById('results').classList.add('hidden');
-        }
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            checkAuth();
 
-        function hideLoading() {
-            document.getElementById('loading').classList.add('hidden');
-            document.getElementById('results').classList.remove('hidden');
-        }
-
-        function showResults(data) {
-            hideLoading();
-            document.getElementById('results').textContent = JSON.stringify(data, null, 2);
-        }
-
-        function clearResults() {
-            document.getElementById('results').textContent = 'Results will appear here...';
-        }
+            // Check for auth success
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('auth') === 'success') {
+                window.history.replaceState({}, document.title, '/');
+            }
+        });
 
         async function checkAuth() {
-            const authSection = document.getElementById('auth-status');
-            const testPanels = document.getElementById('test-panels');
-            const notAuthenticated = document.getElementById('not-authenticated');
-
             try {
-                const response = await fetch(`${API_BASE}/auth/status`, {
-                    credentials: 'include'  // Include session cookie
-                });
+                const response = await fetch(`${API_BASE}/auth/status`, { credentials: 'include' });
                 const data = await response.json();
 
                 if (data.authenticated) {
-                    authSection.innerHTML = `
-                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                            Connected
-                        </span>
-                        <span class="text-gray-600">${data.email || ''}</span>
-                        <span class="text-sm text-gray-500">Mode: ${data.mode}</span>
-                        <button onclick="logout()" class="ml-auto text-sm text-red-500 hover:text-red-700">
-                            Logout
-                        </button>
-                    `;
-                    testPanels.classList.remove('hidden');
-                    notAuthenticated.classList.add('hidden');
+                    showAuthenticatedUI(data);
+                    refreshSyncStatus();
                 } else {
-                    authSection.innerHTML = `
-                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
-                            Not Connected
-                        </span>
-                        <a href="${API_BASE}/auth/login"
-                           class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition">
-                            Connect Google Account
-                        </a>
-                    `;
-                    testPanels.classList.add('hidden');
-                    notAuthenticated.classList.remove('hidden');
+                    showUnauthenticatedUI();
                 }
             } catch (e) {
-                authSection.innerHTML = `
-                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
-                        Error
-                    </span>
-                    <span class="text-gray-600">${e.message}</span>
-                `;
-                testPanels.classList.add('hidden');
-                notAuthenticated.classList.remove('hidden');
+                showUnauthenticatedUI();
             }
+        }
+
+        function showAuthenticatedUI(data) {
+            document.getElementById('auth-status').innerHTML = `
+                <span class="text-sm text-gray-600">${data.email || 'Connected'}</span>
+                <button onclick="logout()" class="text-sm text-gray-400 hover:text-red-500">Logout</button>
+            `;
+            document.getElementById('settings-bar').classList.remove('hidden');
+            document.getElementById('chat-section').classList.remove('hidden');
+            document.getElementById('not-authenticated').classList.add('hidden');
+        }
+
+        function showUnauthenticatedUI() {
+            document.getElementById('auth-status').innerHTML = `
+                <a href="${API_BASE}/auth/login" class="text-sm text-purple-600 hover:text-purple-700">Connect Account</a>
+            `;
+            document.getElementById('settings-bar').classList.add('hidden');
+            document.getElementById('chat-section').classList.add('hidden');
+            document.getElementById('not-authenticated').classList.remove('hidden');
         }
 
         async function logout() {
-            try {
-                await fetch(`${API_BASE}/auth/logout`, {
-                    method: 'POST',
-                    credentials: 'include'
-                });
-                checkAuth();
-            } catch (e) {
-                showResults({ error: e.message });
-            }
+            await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' });
+            checkAuth();
         }
 
-        async function testGmail() {
-            showLoading();
-            try {
-                const query = document.getElementById('gmail-query').value;
-                const url = `${API_BASE}/test/gmail${query ? '?q=' + encodeURIComponent(query) : ''}`;
-                const response = await fetch(url, { credentials: 'include' });
-                const data = await response.json();
-                showResults(data);
-            } catch (e) {
-                showResults({ error: e.message });
-            }
+        function sendSuggestion(text) {
+            document.getElementById('message-input').value = text;
+            sendMessage(new Event('submit'));
         }
 
-        async function testCalendar() {
-            showLoading();
-            try {
-                const timeRange = document.getElementById('calendar-range').value;
-                const url = `${API_BASE}/test/calendar?time_range=${timeRange}`;
-                const response = await fetch(url, { credentials: 'include' });
-                const data = await response.json();
-                showResults(data);
-            } catch (e) {
-                showResults({ error: e.message });
-            }
-        }
+        async function sendMessage(e) {
+            e.preventDefault();
 
-        async function testDrive() {
-            showLoading();
-            try {
-                const name = document.getElementById('drive-name').value;
-                const url = `${API_BASE}/test/drive${name ? '?name=' + encodeURIComponent(name) : ''}`;
-                const response = await fetch(url, { credentials: 'include' });
-                const data = await response.json();
-                showResults(data);
-            } catch (e) {
-                showResults({ error: e.message });
-            }
-        }
+            const input = document.getElementById('message-input');
+            const query = input.value.trim();
+            if (!query || isProcessing) return;
 
-        async function testQuery() {
-            const query = document.getElementById('nl-query').value.trim();
-            if (!query) {
-                alert('Please enter a query');
-                return;
-            }
+            isProcessing = true;
+            input.value = '';
+            document.getElementById('send-btn').disabled = true;
 
-            showLoading();
+            // Add user message
+            addMessage(query, 'user');
+
+            // Add typing indicator
+            const typingId = addTypingIndicator();
+
+            const startTime = performance.now();
+
             try {
                 const response = await fetch(`${API_BASE}/query`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
-                    body: JSON.stringify({ query })
+                    body: JSON.stringify({
+                        query,
+                        conversation_id: conversationId
+                    })
                 });
+
                 const data = await response.json();
-                showResults(data);
+                const endTime = performance.now();
+                const latency = Math.round(endTime - startTime);
+
+                // Update latency display
+                updateLatencyDisplay(latency);
+
+                // Remove typing indicator
+                removeTypingIndicator(typingId);
+
+                // Store conversation ID
+                if (data.conversation_id) {
+                    conversationId = data.conversation_id;
+                }
+
+                // Check if AI is asking clarifying questions
+                if (data.needs_clarification) {
+                    addClarificationMessage(data.response, data.options);
+                } else {
+                    // Add AI response
+                    addMessage(data.response, 'assistant', data.actions_taken, latency);
+                }
+
             } catch (e) {
-                showResults({ error: e.message });
+                removeTypingIndicator(typingId);
+                addMessage('Sorry, I encountered an error. Please try again.', 'assistant', null, null, true);
             }
+
+            isProcessing = false;
+            document.getElementById('send-btn').disabled = false;
+            input.focus();
+        }
+
+        function addMessage(text, role, actions = null, latency = null, isError = false) {
+            const messages = document.getElementById('messages');
+            const isUser = role === 'user';
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message flex ${isUser ? 'justify-end' : 'justify-start'}`;
+
+            let actionsHtml = '';
+            if (actions && actions.length > 0) {
+                const successCount = actions.filter(a => a.success).length;
+                const failCount = actions.filter(a => !a.success).length;
+                actionsHtml = `
+                    <div class="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-400">
+                        ${successCount > 0 ? `<span class="text-green-500">${successCount} action${successCount > 1 ? 's' : ''} completed</span>` : ''}
+                        ${failCount > 0 ? `<span class="text-red-500 ml-2">${failCount} failed</span>` : ''}
+                        ${latency ? `<span class="ml-2">${latency}ms</span>` : ''}
+                    </div>
+                `;
+            }
+
+            messageDiv.innerHTML = `
+                <div class="max-w-[80%] ${isUser
+                    ? 'bg-purple-600 text-white rounded-2xl rounded-tr-sm'
+                    : isError
+                        ? 'bg-red-50 text-red-700 rounded-2xl rounded-tl-sm border border-red-200'
+                        : 'bg-white rounded-2xl rounded-tl-sm shadow-sm'} px-4 py-3">
+                    <p class="${isUser ? '' : 'text-gray-700'} whitespace-pre-wrap">${escapeHtml(text)}</p>
+                    ${actionsHtml}
+                </div>
+            `;
+
+            messages.appendChild(messageDiv);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function addClarificationMessage(text, options) {
+            const messages = document.getElementById('messages');
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message flex justify-start';
+
+            let optionsHtml = '';
+            if (options && options.length > 0) {
+                optionsHtml = `
+                    <div class="mt-3 flex flex-wrap gap-2">
+                        ${options.map(opt => `
+                            <button onclick="sendSuggestion('${escapeHtml(opt)}')"
+                                    class="text-sm px-3 py-1.5 bg-purple-50 text-purple-600 rounded-full hover:bg-purple-100 transition">
+                                ${escapeHtml(opt)}
+                            </button>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            messageDiv.innerHTML = `
+                <div class="max-w-[80%] bg-amber-50 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm border border-amber-200">
+                    <p class="text-gray-700 whitespace-pre-wrap">${escapeHtml(text)}</p>
+                    ${optionsHtml}
+                </div>
+            `;
+
+            messages.appendChild(messageDiv);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function addTypingIndicator() {
+            const messages = document.getElementById('messages');
+            const id = 'typing-' + Date.now();
+
+            const typingDiv = document.createElement('div');
+            typingDiv.id = id;
+            typingDiv.className = 'message flex justify-start';
+            typingDiv.innerHTML = `
+                <div class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+                    <div class="typing-indicator flex gap-1">
+                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                    </div>
+                </div>
+            `;
+
+            messages.appendChild(typingDiv);
+            messages.scrollTop = messages.scrollHeight;
+            return id;
+        }
+
+        function removeTypingIndicator(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        }
+
+        function updateLatencyDisplay(latency) {
+            const display = document.getElementById('latency-display');
+            const color = latency < 500 ? 'text-green-500' : latency < 2000 ? 'text-yellow-500' : 'text-red-500';
+            display.innerHTML = `Last query: <span class="${color}">${latency}ms</span>`;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // Sync functions
         async function triggerSync(service) {
-            showLoading();
             try {
-                const response = await fetch(`${API_BASE}/sync/trigger`, {
+                await fetch(`${API_BASE}/sync/trigger`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
                     body: JSON.stringify({ service })
                 });
-                const data = await response.json();
-                showResults(data);
-
-                // Refresh sync status after a short delay
                 setTimeout(refreshSyncStatus, 2000);
             } catch (e) {
-                showResults({ error: e.message });
+                console.error('Sync error:', e);
             }
         }
 
         async function refreshSyncStatus() {
             try {
-                const response = await fetch(`${API_BASE}/sync/status`, {
-                    credentials: 'include'
-                });
+                const response = await fetch(`${API_BASE}/sync/status`, { credentials: 'include' });
                 const data = await response.json();
 
-                // Update Gmail status
-                const gmailEl = document.getElementById('gmail-sync-status');
-                updateSyncStatusElement(gmailEl, 'Gmail', data.gmail_status, data.gmail_last_sync);
-
-                // Update Calendar status
-                const gcalEl = document.getElementById('gcal-sync-status');
-                updateSyncStatusElement(gcalEl, 'Calendar', data.gcal_status, data.gcal_last_sync);
-
-                // Update Drive status
-                const gdriveEl = document.getElementById('gdrive-sync-status');
-                updateSyncStatusElement(gdriveEl, 'Drive', data.gdrive_status, data.gdrive_last_sync);
-
+                updateIndicator('gmail-indicator', 'Gmail', data.gmail_status, data.gmail_last_sync);
+                updateIndicator('gcal-indicator', 'Calendar', data.gcal_status, data.gcal_last_sync);
+                updateIndicator('gdrive-indicator', 'Drive', data.gdrive_status, data.gdrive_last_sync);
             } catch (e) {
-                console.error('Error fetching sync status:', e);
+                console.error('Status error:', e);
             }
         }
 
-        function updateSyncStatusElement(el, name, status, lastSync) {
-            let statusColor = 'bg-gray-50';
-            let statusText = 'Never synced';
+        function updateIndicator(id, name, status, lastSync) {
+            const el = document.getElementById(id);
+            let bgColor = 'bg-gray-100 text-gray-500';
+            let text = '--';
 
             if (status === 'syncing') {
-                statusColor = 'bg-yellow-50';
-                statusText = 'Syncing...';
+                bgColor = 'bg-yellow-100 text-yellow-700';
+                text = 'Syncing...';
             } else if (status === 'completed') {
-                statusColor = 'bg-green-50';
-                statusText = lastSync ? `Synced ${formatDate(lastSync)}` : 'Completed';
+                bgColor = 'bg-green-100 text-green-700';
+                text = formatRelativeTime(lastSync);
             } else if (status === 'error') {
-                statusColor = 'bg-red-50';
-                statusText = 'Error';
+                bgColor = 'bg-red-100 text-red-700';
+                text = 'Error';
             }
 
-            el.className = `p-3 ${statusColor} rounded`;
-            el.innerHTML = `
-                <div class="text-sm font-medium text-gray-700">${name}</div>
-                <div class="text-xs text-gray-500">${statusText}</div>
-            `;
+            el.className = `px-2 py-1 rounded ${bgColor}`;
+            el.textContent = `${name}: ${text}`;
         }
 
-        function formatDate(dateStr) {
-            if (!dateStr) return '';
-            // Server returns UTC timestamps without 'Z' suffix, so we add it
-            const utcDateStr = dateStr.endsWith('Z') ? dateStr : dateStr + 'Z';
-            const date = new Date(utcDateStr);
-            const now = new Date();
-            const diffMs = now - date;
-            const diffMins = Math.floor(diffMs / 60000);
-
-            if (diffMins < 0) return 'just now'; // Handle slight clock skew
-            if (diffMins < 1) return 'just now';
-            if (diffMins < 60) return `${diffMins}m ago`;
-            const diffHours = Math.floor(diffMins / 60);
-            if (diffHours < 24) return `${diffHours}h ago`;
-            const diffDays = Math.floor(diffHours / 24);
-            return `${diffDays}d ago`;
+        function formatRelativeTime(dateStr) {
+            if (!dateStr) return '--';
+            const date = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
+            const diffMins = Math.floor((Date.now() - date) / 60000);
+            if (diffMins < 1) return 'now';
+            if (diffMins < 60) return `${diffMins}m`;
+            if (diffMins < 1440) return `${Math.floor(diffMins/60)}h`;
+            return `${Math.floor(diffMins/1440)}d`;
         }
-
-        // Check for auth success redirect
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('auth') === 'success') {
-            // Clear the URL parameter
-            window.history.replaceState({}, document.title, '/');
-        }
-
-        // Initial auth check
-        checkAuth();
-
-        // Also refresh sync status when authenticated
-        setTimeout(() => {
-            if (!document.getElementById('test-panels').classList.contains('hidden')) {
-                refreshSyncStatus();
-            }
-        }, 1000);
     </script>
 </body>
 </html>

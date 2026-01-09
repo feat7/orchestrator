@@ -35,6 +35,18 @@ class QueryResponse(BaseModel):
     intent: Optional[dict[str, Any]] = Field(
         default=None, description="The parsed intent (for debugging)"
     )
+    needs_clarification: bool = Field(
+        default=False,
+        description="True if the AI needs more info before proceeding"
+    )
+    options: Optional[list[str]] = Field(
+        default=None,
+        description="Suggested options for clarification"
+    )
+    latency_ms: Optional[int] = Field(
+        default=None,
+        description="Server-side processing time in milliseconds"
+    )
 
 
 class SyncTriggerRequest(BaseModel):
@@ -62,3 +74,19 @@ class HealthResponse(BaseModel):
     status: str = Field(default="healthy")
     database: str = Field(default="connected")
     redis: str = Field(default="connected")
+
+
+class MetricsResponse(BaseModel):
+    """Performance metrics response."""
+
+    total_queries: int = Field(description="Total queries processed")
+    avg_latency_ms: float = Field(description="Average latency in milliseconds")
+    p50_latency_ms: float = Field(description="Median latency")
+    p95_latency_ms: float = Field(description="95th percentile latency")
+    p99_latency_ms: float = Field(description="99th percentile latency")
+    cache_hit_rate: float = Field(description="Cache hit rate (0-1)")
+    embedding_latency_ms: float = Field(description="Average embedding query latency")
+    search_precision_at_5: Optional[float] = Field(
+        default=None,
+        description="Precision@5 for search results"
+    )
