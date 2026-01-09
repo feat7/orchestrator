@@ -41,10 +41,10 @@ class DriveService:
         filters: Optional[dict] = None,
         limit: int = 10,
     ) -> list[dict]:
-        """Hybrid search: vector similarity + metadata filters.
+        """Search files using local cache with vector similarity.
 
-        For real API: Searches Drive with query filters.
-        For mock: Uses local pgvector search.
+        Always searches the local pgvector cache first (fast semantic search).
+        This uses embeddings generated during sync for semantic similarity ranking.
 
         Args:
             user_id: The user's ID
@@ -55,47 +55,7 @@ class DriveService:
         Returns:
             List of matching files
         """
-        if not settings.use_mock_google and self.service:
-            try:
-                # Build Drive search query
-                query_parts = ["trashed = false"]
-
-                if filters:
-                    if filters.get("mime_type"):
-                        query_parts.append(f"mimeType contains '{filters['mime_type']}'")
-                    if filters.get("name"):
-                        query_parts.append(f"name contains '{filters['name']}'")
-                    if filters.get("modified_after"):
-                        date_str = filters["modified_after"].strftime("%Y-%m-%dT%H:%M:%S")
-                        query_parts.append(f"modifiedTime > '{date_str}'")
-
-                query = " and ".join(query_parts)
-
-                results = self.service.files().list(
-                    q=query,
-                    spaces="drive",
-                    fields="files(id, name, mimeType, webViewLink, modifiedTime, owners, description)",
-                    pageSize=limit,
-                ).execute()
-
-                files = results.get("files", [])
-
-                return [
-                    {
-                        "id": f["id"],
-                        "name": f.get("name", "Untitled"),
-                        "mime_type": f.get("mimeType", ""),
-                        "content_preview": f.get("description", ""),
-                        "web_link": f.get("webViewLink", ""),
-                        "modified_at": f.get("modifiedTime"),
-                        "owners": [o.get("emailAddress", "") for o in f.get("owners", [])],
-                    }
-                    for f in files
-                ]
-            except Exception as e:
-                print(f"Drive API error, falling back to cache: {e}")
-
-        # Mock mode or fallback: use local pgvector search
+        # Always use local pgvector search for speed and semantic matching
         query = select(GdriveCache).where(
             GdriveCache.user_id == uuid.UUID(user_id)
         )
@@ -106,6 +66,10 @@ class DriveService:
                 query = query.where(
                     GdriveCache.mime_type.ilike(f"%{filters['mime_type']}%")
                 )
+            if filters.get("name"):
+                query = query.where(
+                    GdriveCache.name.ilike(f"%{filters['name']}%")
+                )
             if filters.get("modified_after"):
                 query = query.where(
                     GdriveCache.modified_at >= filters["modified_after"]
@@ -115,7 +79,7 @@ class DriveService:
                     GdriveCache.modified_at <= filters["modified_before"]
                 )
 
-        # Order by vector similarity
+        # Order by vector similarity (cosine distance)
         query = query.order_by(
             GdriveCache.embedding.cosine_distance(embedding)
         ).limit(limit)
