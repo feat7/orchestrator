@@ -290,7 +290,7 @@ async def _stream_query_response(
         from app.agents.gmail import GmailAgent
         from app.agents.gcal import GcalAgent
         from app.agents.gdrive import GdriveAgent
-        from app.schemas.intent import ServiceType
+        from app.schemas.intent import ServiceType, StepResult
 
         # Get user credentials
         credentials = await get_user_credentials(user_id, db)
@@ -394,7 +394,6 @@ async def _stream_query_response(
             # Process results
             for (step_id, step_type, _), result in zip(tasks, results):
                 if isinstance(result, Exception):
-                    from app.schemas.intent import StepResult
                     result = StepResult(step=step_type, success=False, error=str(result))
                 step_results[step_id] = result
                 all_results.append(result)
