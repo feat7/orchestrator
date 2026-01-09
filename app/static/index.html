@@ -4,8 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Google Workspace Orchestrator</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind CSS v3 from local file (fallback to CDNs) -->
+    <link rel="stylesheet" href="/static/tailwind.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/tailwindcss@3.4.1/dist/tailwind.min.css';">
     <style>
+        /* Critical CSS fallback in case Tailwind doesn't load */
         .loader { border-top-color: #3b82f6; animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
