@@ -25,6 +25,7 @@ svg { display: block; vertical-align: middle; }
 .max-w-md { max-width: 28rem; }
 .max-w-\[80\%\] { max-width: 80%; }
 .min-h-screen { min-height: 100vh; }
+.min-w-\[200px\] { min-width: 200px; }
 
 /* Flexbox */
 .flex { display: flex; }
@@ -112,6 +113,7 @@ svg { display: block; vertical-align: middle; }
 .bg-gray-100 { background-color: #f3f4f6; }
 .bg-gray-400 { background-color: #9ca3af; }
 .bg-purple-50 { background-color: #faf5ff; }
+.bg-purple-400 { background-color: #a78bfa; }
 .bg-purple-600 { background-color: #9333ea; }
 .bg-blue-50 { background-color: #eff6ff; }
 .bg-green-100 { background-color: #dcfce7; }

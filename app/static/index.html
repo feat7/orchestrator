@@ -197,13 +197,14 @@
             // Add user message
             addMessage(query, 'user');
 
-            // Add typing indicator
-            const typingId = addTypingIndicator();
+            // Add status indicator for streaming
+            const statusId = addStatusIndicator();
 
             const startTime = performance.now();
 
             try {
-                const response = await fetch(`${API_BASE}/query`, {
+                // Use streaming endpoint
+                const response = await fetch(`${API_BASE}/query/stream`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'include',
@@ -213,31 +214,80 @@
                     })
                 });
 
-                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                // Read the SSE stream
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let finalData = null;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Process complete SSE events
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // Keep incomplete line in buffer
+
+                    let eventType = null;
+                    let eventData = null;
+
+                    for (const line of lines) {
+                        if (line.startsWith('event: ')) {
+                            eventType = line.slice(7);
+                        } else if (line.startsWith('data: ')) {
+                            try {
+                                eventData = JSON.parse(line.slice(6));
+
+                                // Handle different event types
+                                if (eventType === 'status') {
+                                    updateStatusIndicator(statusId, eventData.message);
+                                } else if (eventType === 'response_chunk') {
+                                    appendToStreamedResponse(statusId, eventData.text);
+                                } else if (eventType === 'done') {
+                                    finalData = eventData;
+                                } else if (eventType === 'error') {
+                                    throw new Error(eventData.message);
+                                }
+                            } catch (parseErr) {
+                                console.error('Parse error:', parseErr);
+                            }
+                        }
+                    }
+                }
+
                 const endTime = performance.now();
-                const latency = Math.round(endTime - startTime);
+                const latency = finalData?.latency_ms || Math.round(endTime - startTime);
 
                 // Update latency display
                 updateLatencyDisplay(latency);
 
-                // Remove typing indicator
-                removeTypingIndicator(typingId);
+                // Remove status indicator
+                removeTypingIndicator(statusId);
 
-                // Store conversation ID
-                if (data.conversation_id) {
-                    conversationId = data.conversation_id;
+                if (finalData) {
+                    // Store conversation ID
+                    if (finalData.conversation_id) {
+                        conversationId = finalData.conversation_id;
+                    }
+
+                    // Check if AI is asking clarifying questions
+                    if (finalData.needs_clarification) {
+                        addClarificationMessage(finalData.response, finalData.options);
+                    } else {
+                        // Add AI response
+                        addMessage(finalData.response, 'assistant', finalData.actions_taken, latency);
+                    }
                 }
 
-                // Check if AI is asking clarifying questions
-                if (data.needs_clarification) {
-                    addClarificationMessage(data.response, data.options);
-                } else {
-                    // Add AI response
-                    addMessage(data.response, 'assistant', data.actions_taken, latency);
-                }
-
-            } catch (e) {
-                removeTypingIndicator(typingId);
+            } catch (err) {
+                console.error('Stream error:', err);
+                removeTypingIndicator(statusId);
                 addMessage('Sorry, I encountered an error. Please try again.', 'assistant', null, null, true);
             }
 
@@ -332,6 +382,55 @@
             messages.appendChild(typingDiv);
             messages.scrollTop = messages.scrollHeight;
             return id;
+        }
+
+        function addStatusIndicator() {
+            const messages = document.getElementById('messages');
+            const id = 'status-' + Date.now();
+
+            const statusDiv = document.createElement('div');
+            statusDiv.id = id;
+            statusDiv.className = 'message flex justify-start';
+            statusDiv.innerHTML = `
+                <div class="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm min-w-[200px]">
+                    <div class="flex items-center gap-2">
+                        <div class="typing-indicator flex gap-1">
+                            <span class="w-2 h-2 bg-purple-400 rounded-full"></span>
+                            <span class="w-2 h-2 bg-purple-400 rounded-full"></span>
+                            <span class="w-2 h-2 bg-purple-400 rounded-full"></span>
+                        </div>
+                        <span class="status-text text-sm text-gray-500">Processing...</span>
+                    </div>
+                    <div class="streamed-response mt-2 text-gray-700 hidden"></div>
+                </div>
+            `;
+
+            messages.appendChild(statusDiv);
+            messages.scrollTop = messages.scrollHeight;
+            return id;
+        }
+
+        function updateStatusIndicator(id, message) {
+            const el = document.getElementById(id);
+            if (el) {
+                const statusText = el.querySelector('.status-text');
+                if (statusText) statusText.textContent = message;
+                const messages = document.getElementById('messages');
+                messages.scrollTop = messages.scrollHeight;
+            }
+        }
+
+        function appendToStreamedResponse(id, text) {
+            const el = document.getElementById(id);
+            if (el) {
+                const responseDiv = el.querySelector('.streamed-response');
+                if (responseDiv) {
+                    responseDiv.classList.remove('hidden');
+                    responseDiv.textContent += text;
+                }
+                const messages = document.getElementById('messages');
+                messages.scrollTop = messages.scrollHeight;
+            }
         }
 
         function removeTypingIndicator(id) {

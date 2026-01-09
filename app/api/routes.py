@@ -1,10 +1,12 @@
 """API routes for the Google Workspace Orchestrator."""
 
+import json
+import asyncio
 from uuid import UUID, uuid4
-from typing import Optional
+from typing import Optional, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -250,6 +252,279 @@ async def process_query(
             intent=None,
             latency_ms=latency_ms,
         )
+
+
+async def _stream_query_response(
+    query: str,
+    conversation_id: UUID,
+    user_id: str,
+    db: AsyncSession,
+    embedding_service,
+    synthesizer: ResponseSynthesizer,
+    cache: CacheService,
+    conversation_context: list,
+) -> AsyncGenerator[str, None]:
+    """Stream query processing with status updates via SSE.
+
+    Yields Server-Sent Events with:
+    - status: Current processing step
+    - step_complete: When a step finishes
+    - response_chunk: Parts of the response text
+    - done: Final result with all data
+    - error: If something goes wrong
+    """
+    start_time = time.time()
+
+    def sse_event(event_type: str, data: dict) -> str:
+        """Format data as SSE event."""
+        return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+    try:
+        # Step 1: Get orchestrator
+        yield sse_event("status", {"message": "Initializing...", "step": 0, "total_steps": 4})
+
+        from app.core.orchestrator import Orchestrator
+        from app.core.intent import IntentClassifier
+        from app.core.planner import QueryPlanner
+        from app.agents.gmail_agent import GmailAgent
+        from app.agents.calendar_agent import CalendarAgent
+        from app.agents.drive_agent import DriveAgent
+        from app.schemas.intent import ServiceType
+
+        # Get user credentials
+        credentials = await get_user_credentials(user_id, db)
+
+        # Initialize services
+        gmail_service = GmailService(db, credentials)
+        calendar_service = CalendarService(db, credentials)
+        drive_service = DriveService(db, credentials)
+
+        # Create agents
+        agents = {
+            ServiceType.GMAIL: GmailAgent(gmail_service, embedding_service),
+            ServiceType.GCAL: CalendarAgent(calendar_service, embedding_service),
+            ServiceType.GDRIVE: DriveAgent(drive_service, embedding_service),
+        }
+
+        classifier = IntentClassifier(embedding_service)
+        planner = QueryPlanner()
+        orchestrator = Orchestrator(classifier, planner, agents)
+
+        # Step 2: Classify intent
+        yield sse_event("status", {"message": "Understanding your request...", "step": 1, "total_steps": 4})
+        await asyncio.sleep(0.05)  # Small delay for UI feedback
+
+        intent = await orchestrator.classifier.classify(query, conversation_context)
+
+        # Check confidence and potentially need clarification
+        if intent.confidence < CLARIFICATION_CONFIDENCE_THRESHOLD:
+            options = _generate_clarification_options(query, intent)
+            if options:
+                latency_ms = int((time.time() - start_time) * 1000)
+                yield sse_event("done", {
+                    "response": f"I'm not quite sure what you mean. Could you clarify?\n\nYour query: \"{query}\"\n\nDid you mean one of these?",
+                    "actions_taken": [],
+                    "conversation_id": str(conversation_id),
+                    "intent": intent.model_dump(),
+                    "needs_clarification": True,
+                    "options": options,
+                    "latency_ms": latency_ms,
+                })
+                return
+
+        # Step 3: Create plan and show what we'll do
+        yield sse_event("status", {"message": "Planning actions...", "step": 2, "total_steps": 4})
+
+        plan = orchestrator.planner.create_plan(intent)
+
+        # Show the services we'll query
+        services_involved = list(set(s.service.value for s in plan.steps if hasattr(s.service, 'value')))
+        service_names = {
+            "gmail": "Gmail",
+            "gcal": "Calendar",
+            "gdrive": "Drive"
+        }
+        service_display = [service_names.get(s, s) for s in services_involved]
+
+        if service_display:
+            yield sse_event("status", {
+                "message": f"Searching {', '.join(service_display)}...",
+                "step": 2,
+                "total_steps": 4,
+                "services": services_involved
+            })
+
+        # Step 4: Execute plan with progress updates
+        all_results = []
+        step_results = {}
+        total_groups = len(plan.parallel_groups)
+
+        for group_idx, parallel_group in enumerate(plan.parallel_groups):
+            steps = [s for s in plan.steps if s.step_id in parallel_group]
+
+            # Show what steps we're executing
+            step_names = []
+            for step in steps:
+                step_value = step.step.value if hasattr(step.step, 'value') else step.step
+                if step_value.startswith("search_"):
+                    service = step.service.value if hasattr(step.service, 'value') else step.service
+                    step_names.append(f"Searching {service_names.get(service, service)}")
+                else:
+                    step_names.append(step_value.replace("_", " ").title())
+
+            yield sse_event("status", {
+                "message": " & ".join(step_names) + "...",
+                "step": 3,
+                "total_steps": 4,
+                "progress": f"{group_idx + 1}/{total_groups}"
+            })
+
+            # Execute steps in parallel
+            tasks = []
+            for step in steps:
+                params = orchestrator._enrich_params(step, step_results, intent)
+                task = orchestrator._execute_step(step, params, user_id)
+                tasks.append((step.step_id, step.step, task))
+
+            results = await asyncio.gather(*[t[2] for t in tasks], return_exceptions=True)
+
+            # Process results
+            for (step_id, step_type, _), result in zip(tasks, results):
+                if isinstance(result, Exception):
+                    from app.schemas.intent import StepResult
+                    result = StepResult(step=step_type, success=False, error=str(result))
+                step_results[step_id] = result
+                all_results.append(result)
+
+                # Notify step completion
+                step_value = step_type.value if hasattr(step_type, 'value') else step_type
+                yield sse_event("step_complete", {
+                    "step": step_value,
+                    "success": result.success,
+                    "has_results": bool(result.data and result.data.get("results"))
+                })
+
+        # Step 5: Synthesize response
+        yield sse_event("status", {"message": "Composing response...", "step": 4, "total_steps": 4})
+
+        step_results_list = [
+            r if isinstance(r, StepResult) else StepResult(**r.model_dump() if hasattr(r, 'model_dump') else r)
+            for r in all_results
+        ]
+
+        response_text = await synthesizer.synthesize(
+            query=query,
+            intent=intent,
+            results=step_results_list,
+        )
+
+        # Stream the response text in chunks for a more dynamic feel
+        words = response_text.split()
+        chunk_size = 5  # Send 5 words at a time
+        streamed_text = ""
+
+        for i in range(0, len(words), chunk_size):
+            chunk = " ".join(words[i:i + chunk_size])
+            streamed_text += chunk + " "
+            yield sse_event("response_chunk", {"text": chunk + " ", "partial": streamed_text.strip()})
+            await asyncio.sleep(0.02)  # Small delay for streaming effect
+
+        # Convert results to ActionTaken format
+        actions_taken = [
+            {
+                "step": r.step.value if hasattr(r.step, 'value') else r.step,
+                "success": r.success,
+                "data": r.data,
+                "error": r.error,
+            }
+            for r in step_results_list
+        ]
+
+        # Save to conversation context
+        await cache.add_to_conversation(
+            str(conversation_id),
+            {"query": query, "intent": intent.model_dump()},
+        )
+
+        latency_ms = int((time.time() - start_time) * 1000)
+        _metrics["latencies"].append(latency_ms)
+
+        # Keep only last 1000 latency measurements
+        if len(_metrics["latencies"]) > 1000:
+            _metrics["latencies"] = _metrics["latencies"][-1000:]
+
+        # Send final done event
+        yield sse_event("done", {
+            "response": response_text,
+            "actions_taken": actions_taken,
+            "conversation_id": str(conversation_id),
+            "intent": intent.model_dump(),
+            "needs_clarification": False,
+            "options": None,
+            "latency_ms": latency_ms,
+        })
+
+    except Exception as e:
+        latency_ms = int((time.time() - start_time) * 1000)
+        _metrics["latencies"].append(latency_ms)
+
+        yield sse_event("error", {
+            "message": str(e),
+            "latency_ms": latency_ms,
+        })
+
+
+@router.post("/query/stream")
+async def process_query_stream(
+    request: QueryRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    embedding_service=Depends(get_embedding_service),
+    synthesizer: ResponseSynthesizer = Depends(get_synthesizer),
+    cache: CacheService = Depends(get_cache_service),
+):
+    """Process a natural language query with streaming response.
+
+    Returns Server-Sent Events (SSE) stream with real-time updates:
+    - status: Processing step updates
+    - step_complete: When each step finishes
+    - response_chunk: Streamed parts of the response
+    - done: Final complete response
+    - error: If something goes wrong
+
+    Use this endpoint for a more responsive UI experience.
+    """
+    conversation_id = request.conversation_id or uuid4()
+
+    # Get conversation context from cache
+    conversation_context = []
+    if request.conversation_id:
+        conversation_context = await cache.get_conversation_context(
+            str(request.conversation_id)
+        )
+        if conversation_context:
+            _metrics["cache_hits"] += 1
+        else:
+            _metrics["cache_misses"] += 1
+
+    return StreamingResponse(
+        _stream_query_response(
+            query=request.query,
+            conversation_id=conversation_id,
+            user_id=current_user.user_id,
+            db=db,
+            embedding_service=embedding_service,
+            synthesizer=synthesizer,
+            cache=cache,
+            conversation_context=conversation_context,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
 
 
 @router.post("/sync/trigger")
