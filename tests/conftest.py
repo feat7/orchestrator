@@ -15,14 +15,17 @@ from app.core.llm import LLMProvider
 class MockLLMProvider(LLMProvider):
     """Mock LLM provider for testing."""
 
+    @property
+    def name(self) -> str:
+        return "mock"
+
     async def complete(self, prompt: str, system: str = None, json_mode: bool = False) -> str:
         """Return mock intent classification."""
         if json_mode or "classify" in prompt.lower():
             return '''{
                 "services": ["gmail"],
                 "operation": "search",
-                "entities": {"topic": "test"},
-                "steps": ["search_gmail"],
+                "steps": [{"step": "search_gmail", "params": {"search_query": "test"}}],
                 "confidence": 0.95
             }'''
         return "This is a mock response."
@@ -59,13 +62,13 @@ def sample_query():
 @pytest.fixture
 def sample_intent():
     """Provide sample parsed intent."""
-    from app.schemas.intent import ParsedIntent, ServiceType, StepType
+    from app.schemas.intent import ParsedIntent, ServiceType, StepType, ExecutionStep
 
     return ParsedIntent(
         services=[ServiceType.GCAL],
         operation="search",
         entities={"time_range": "next_week"},
-        steps=[StepType.SEARCH_CALENDAR],
+        steps=[ExecutionStep(step=StepType.SEARCH_CALENDAR, params={"search_query": "next week"})],
         confidence=0.95,
     )
 
@@ -73,12 +76,16 @@ def sample_intent():
 @pytest.fixture
 def sample_multi_service_intent():
     """Provide sample multi-service intent."""
-    from app.schemas.intent import ParsedIntent, ServiceType, StepType
+    from app.schemas.intent import ParsedIntent, ServiceType, StepType, ExecutionStep
 
     return ParsedIntent(
         services=[ServiceType.GMAIL, ServiceType.GCAL],
         operation="update",
         entities={"airline": "Turkish Airlines", "action": "cancel"},
-        steps=[StepType.SEARCH_GMAIL, StepType.SEARCH_CALENDAR, StepType.DRAFT_EMAIL],
+        steps=[
+            ExecutionStep(step=StepType.SEARCH_GMAIL, params={"search_query": "Turkish Airlines"}),
+            ExecutionStep(step=StepType.SEARCH_CALENDAR, params={"search_query": "flight"}),
+            ExecutionStep(step=StepType.DRAFT_EMAIL, params={"message": "cancel"}, depends_on=[0]),
+        ],
         confidence=0.9,
     )

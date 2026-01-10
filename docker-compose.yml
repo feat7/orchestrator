@@ -61,5 +61,21 @@ services:
       - ./app:/app/app
     command: celery -A app.celery_app worker --loglevel=info --concurrency=2
 
+  celery-beat:
+    build: .
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://orchestrator:orchestrator@db:5432/orchestrator
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    command: celery -A app.celery_app beat --loglevel=info
+
 volumes:
   postgres_data:

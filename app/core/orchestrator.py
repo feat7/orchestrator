@@ -46,14 +46,14 @@ class Orchestrator:
         Returns:
             Dictionary with intent, plan, and results
         """
-        # 1. Classify intent
+        # 1. Classify intent (LLM extracts exact params for each step)
         intent = await self.classifier.classify(query, conversation_context)
 
         # 2. Create execution plan
         plan = self.planner.create_plan(intent)
 
         # 3. Execute plan
-        results = await self._execute_plan(plan, user_id, intent)
+        results = await self._execute_plan(plan, user_id, intent, query)
 
         return {
             "intent": intent.model_dump(),
@@ -65,7 +65,7 @@ class Orchestrator:
         }
 
     async def _execute_plan(
-        self, plan: ExecutionPlan, user_id: str, intent: ParsedIntent
+        self, plan: ExecutionPlan, user_id: str, intent: ParsedIntent, original_query: str = ""
     ) -> list[StepResult]:
         """Execute the plan respecting dependencies, parallelizing where possible.
 
@@ -73,6 +73,7 @@ class Orchestrator:
             plan: The execution plan
             user_id: The user's ID
             intent: The parsed intent
+            original_query: The original user query for fallback
 
         Returns:
             List of step results
@@ -88,7 +89,7 @@ class Orchestrator:
             tasks = []
             for step in steps:
                 # Enrich params with results from dependencies
-                params = self._enrich_params(step, step_results, intent)
+                params = self._enrich_params(step, step_results, intent, original_query)
                 task = self._execute_step(step, params, user_id)
                 tasks.append((step.step_id, step.step, task))
 
@@ -133,14 +134,40 @@ class Orchestrator:
             # Get step value (handle both enum and string)
             step_value = step.step.value if hasattr(step.step, 'value') else step.step
 
-            # Handle search steps
+            # Handle search steps - params come directly from LLM
             if step_value.startswith("search_"):
-                query = params.get("search_query", "")
+                search_query = params.get("search_query", "")
                 filters = params.get("filters", {})
-                results = await agent.search(query, user_id, filters)
+                results = await agent.search(search_query, user_id, filters)
                 return StepResult(
                     step=step.step, success=True, data={"results": results}
                 )
+
+            # Handle recipient resolution issues before executing send/draft
+            if step.step in (StepType.DRAFT_EMAIL, StepType.SEND_EMAIL):
+                if params.get("clarification_needed"):
+                    return StepResult(
+                        step=step.step,
+                        success=False,
+                        error="clarification_needed",
+                        data={
+                            "type": "clarification_needed",
+                            "recipient_name": params.get("to_name", ""),
+                            "email_options": params.get("email_options", []),
+                            "message": f"I found multiple email addresses for '{params.get('to_name', '')}'. Which one should I use?"
+                        }
+                    )
+                if params.get("recipient_not_found"):
+                    return StepResult(
+                        step=step.step,
+                        success=False,
+                        error="recipient_not_found",
+                        data={
+                            "type": "recipient_not_found",
+                            "recipient_name": params.get("to_name", ""),
+                            "message": f"I couldn't find an email address for '{params.get('to_name', '')}' in your recent emails. Could you provide their email address?"
+                        }
+                    )
 
             # Execute action steps
             return await agent.execute(step.step, params, user_id)
@@ -149,51 +176,65 @@ class Orchestrator:
             return StepResult(step=step.step, success=False, error=str(e))
 
     def _enrich_params(
-        self, step: ExecutionStep, step_results: dict, intent: ParsedIntent
+        self, step: ExecutionStep, step_results: dict, intent: ParsedIntent, original_query: str = ""
     ) -> dict:
         """Enrich step parameters with results from dependencies.
+
+        Now much simpler since LLM provides exact params. We just need to:
+        1. Convert date filter params to the filters dict format
+        2. Pass data from dependency results to action steps
 
         Args:
             step: The current step
             step_results: Results from previously executed steps
             intent: The parsed intent
+            original_query: Original user query for fallback
 
         Returns:
             Enriched parameters dictionary
         """
         params = step.params.copy()
+        params["original_query"] = original_query
 
-        # Get step value (handle both enum and string)
         step_value = step.step.value if hasattr(step.step, 'value') else step.step
 
-        # Build search query from entities for search steps
+        # For search steps, convert LLM params to filters dict
         if step_value.startswith("search_"):
-            entities = intent.entities
-            search_parts = []
-
-            # Add relevant entity values to search query
-            for key, value in entities.items():
-                if key not in ("action", "operation"):
-                    if isinstance(value, str):
-                        search_parts.append(value)
-                    elif isinstance(value, list):
-                        search_parts.extend(str(v) for v in value)
-
-            params["search_query"] = " ".join(search_parts) if search_parts else ""
-
-            # Add filters based on entities
             filters = {}
-            if entities.get("sender"):
-                filters["sender"] = entities["sender"]
-            if entities.get("time_range"):
-                filters["time_range"] = entities["time_range"]
-            if entities.get("time"):
-                filters["time"] = entities["time"]
-            if entities.get("mime_type"):
-                filters["mime_type"] = entities["mime_type"]
+
+            # Drive filters
+            if params.get("modified_after"):
+                filters["modified_after"] = params["modified_after"]
+            if params.get("modified_before"):
+                filters["modified_before"] = params["modified_before"]
+            if params.get("mime_type"):
+                filters["mime_type"] = params["mime_type"]
+            if params.get("file_name"):
+                filters["name"] = params["file_name"]
+
+            # Gmail filters
+            if params.get("sender"):
+                filters["sender"] = params["sender"]
+            if params.get("recipient"):
+                filters["recipient"] = params["recipient"]
+            if params.get("subject"):
+                filters["subject"] = params["subject"]
+            if params.get("after_date"):
+                filters["after_date"] = params["after_date"]
+            if params.get("before_date"):
+                filters["before_date"] = params["before_date"]
+
+            # Calendar filters
+            if params.get("start_after"):
+                filters["start_after"] = params["start_after"]
+            if params.get("start_before"):
+                filters["start_before"] = params["start_before"]
+            if params.get("attendee"):
+                filters["attendee"] = params["attendee"]
+
             params["filters"] = filters
 
-        # Get data from dependencies
+        # Get data from dependencies (for action steps)
         for dep_id in step.depends_on:
             if dep_id in step_results:
                 dep_result = step_results[dep_id]
@@ -201,23 +242,115 @@ class Orchestrator:
                     # If dependency was a search, pass first result's data
                     if "results" in dep_result.data and dep_result.data["results"]:
                         first_result = dep_result.data["results"][0]
-                        params["source_data"] = first_result
 
-                        # Auto-fill IDs from search results
-                        if "id" in first_result:
-                            item_id = first_result["id"]
-                            if "email_id" not in params:
-                                params["email_id"] = item_id
-                            if "event_id" not in params:
-                                params["event_id"] = item_id
-                            if "file_id" not in params:
-                                params["file_id"] = item_id
+                        # Check if this is recipient resolution (to_name set but no to email)
+                        is_recipient_resolution = params.get("to_name") and not params.get("to")
 
-                        # Extract useful data for drafting emails
-                        if step.step == StepType.DRAFT_EMAIL:
-                            if "sender" in first_result:
-                                params["to"] = first_result["sender"]
-                            if "subject" in first_result:
-                                params["subject"] = f"Re: {first_result['subject']}"
+                        if not is_recipient_resolution:
+                            params["source_data"] = first_result
+
+                            # Auto-fill IDs from search results
+                            # Check for falsy values (empty string, None) not just missing keys
+                            if "id" in first_result:
+                                item_id = first_result["id"]
+                                if not params.get("email_id"):
+                                    params["email_id"] = item_id
+                                if not params.get("event_id"):
+                                    params["event_id"] = item_id
+                                if not params.get("file_id"):
+                                    params["file_id"] = item_id
+
+                        # Handle recipient resolution for draft/send email
+                        if is_recipient_resolution and step.step in (StepType.DRAFT_EMAIL, StepType.SEND_EMAIL):
+                            resolved = self._resolve_recipient(
+                                dep_result.data.get("results", []),
+                                params.get("to_name", "")
+                            )
+                            if resolved.get("clarification_needed"):
+                                params["clarification_needed"] = True
+                                params["email_options"] = resolved["email_options"]
+                            elif resolved.get("resolved_email"):
+                                params["to"] = resolved["resolved_email"]
+                                if resolved.get("resolved_name"):
+                                    full_name = resolved["resolved_name"]
+                                    first_name = full_name.split()[0] if full_name else ""
+                                    params["recipient_name"] = first_name
+                            else:
+                                params["recipient_not_found"] = True
 
         return params
+
+    def _resolve_recipient(self, search_results: list[dict], recipient_name: str) -> dict:
+        """Resolve a recipient name to an email address from search results.
+
+        Args:
+            search_results: List of email search results
+            recipient_name: The name to resolve
+
+        Returns:
+            dict with either:
+            - resolved_email: The resolved email address (if exactly one match)
+            - resolved_name: The full name extracted from the email header
+            - clarification_needed + email_options: If multiple matches
+            - Empty dict if no matches found
+        """
+        if not search_results or not recipient_name:
+            return {}
+
+        recipient_lower = recipient_name.lower()
+        email_to_name: dict[str, str] = {}
+
+        for result in search_results:
+            sender = result.get("sender", "")
+            if not sender:
+                continue
+
+            sender_lower = sender.lower()
+            if recipient_lower in sender_lower:
+                if "<" in sender and ">" in sender:
+                    name_part = sender[:sender.index("<")].strip()
+                    email = sender[sender.index("<")+1:sender.index(">")]
+                    name_part = name_part.strip('"\'')
+                    if email.lower() not in email_to_name and name_part:
+                        email_to_name[email.lower()] = name_part
+                    elif email.lower() not in email_to_name:
+                        email_to_name[email.lower()] = ""
+                elif "@" in sender:
+                    email = sender.strip()
+                    if email.lower() not in email_to_name:
+                        email_to_name[email.lower()] = ""
+
+        # Also check recipients field
+        for result in search_results:
+            recipients = result.get("recipients", [])
+            if isinstance(recipients, list):
+                for recip in recipients:
+                    if isinstance(recip, str) and recipient_lower in recip.lower():
+                        if "<" in recip and ">" in recip:
+                            name_part = recip[:recip.index("<")].strip()
+                            email = recip[recip.index("<")+1:recip.index(">")]
+                            name_part = name_part.strip('"\'')
+                            if email.lower() not in email_to_name and name_part:
+                                email_to_name[email.lower()] = name_part
+                            elif email.lower() not in email_to_name:
+                                email_to_name[email.lower()] = ""
+                        elif "@" in recip:
+                            email = recip.strip()
+                            if email.lower() not in email_to_name:
+                                email_to_name[email.lower()] = ""
+
+        matching_emails = list(email_to_name.keys())
+
+        if len(matching_emails) == 1:
+            email = matching_emails[0]
+            full_name = email_to_name[email]
+            if not full_name:
+                full_name = recipient_name.title()
+            return {"resolved_email": email, "resolved_name": full_name}
+        elif len(matching_emails) > 1:
+            return {
+                "clarification_needed": True,
+                "email_options": matching_emails[:5]
+            }
+        else:
+            return {}

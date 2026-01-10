@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
-from app.schemas.intent import ParsedIntent, StepType, ServiceType
+from app.schemas.intent import ParsedIntent, StepType, ServiceType, ExecutionStep as IntentStep
 
 
 @dataclass
@@ -76,6 +76,8 @@ class QueryPlanner:
     def create_plan(self, intent: ParsedIntent) -> ExecutionPlan:
         """Convert a parsed intent into an executable plan.
 
+        The intent now contains steps with their own typed params.
+
         Args:
             intent: The parsed intent from classification
 
@@ -84,17 +86,38 @@ class QueryPlanner:
         """
         execution_steps = []
 
-        for idx, step in enumerate(intent.steps):
+        for idx, intent_step in enumerate(intent.steps):
             step_id = f"step_{idx}"
-            service = self.STEP_SERVICE_MAP.get(step, ServiceType.GMAIL)
+
+            # Get step type (handle both old and new format)
+            if isinstance(intent_step, IntentStep):
+                step_type = StepType(intent_step.step) if isinstance(intent_step.step, str) else intent_step.step
+                params = intent_step.params.copy()
+                explicit_deps = intent_step.depends_on
+            else:
+                # Old format: step is just a StepType
+                step_type = intent_step
+                params = intent.entities.copy()
+                explicit_deps = None
+
+            service = self.STEP_SERVICE_MAP.get(step_type, ServiceType.GMAIL)
 
             # Determine dependencies
-            depends_on = self._compute_dependencies(step, intent.steps[:idx], idx)
+            if explicit_deps is not None:
+                # Use explicit dependencies from LLM
+                depends_on = [f"step_{dep_idx}" for dep_idx in explicit_deps]
+            else:
+                # Compute dependencies automatically
+                prev_steps = [
+                    s.step if isinstance(s, IntentStep) else s
+                    for s in intent.steps[:idx]
+                ]
+                depends_on = self._compute_dependencies(step_type, prev_steps, idx)
 
             exec_step = ExecutionStep(
-                step=step,
+                step=step_type,
                 service=service,
-                params=intent.entities.copy(),
+                params=params,
                 depends_on=depends_on,
                 step_id=step_id,
             )
@@ -131,10 +154,11 @@ class QueryPlanner:
             # Look for the most recent relevant producer
             for prev_idx in range(current_idx - 1, -1, -1):
                 prev_step = previous_steps[prev_idx]
+                prev_step_type = prev_step if isinstance(prev_step, StepType) else StepType(prev_step)
 
                 # Check if this is a producer step
-                if prev_step in self.PRODUCER_STEPS:
-                    prev_service = self.STEP_SERVICE_MAP.get(prev_step)
+                if prev_step_type in self.PRODUCER_STEPS:
+                    prev_service = self.STEP_SERVICE_MAP.get(prev_step_type)
 
                     # Depend on search from same service
                     if prev_service == service:
@@ -142,7 +166,7 @@ class QueryPlanner:
                         break
 
                     # Action steps can depend on any search
-                    if prev_step in self.SEARCH_STEPS and step not in self.SEARCH_STEPS:
+                    if prev_step_type in self.SEARCH_STEPS and step not in self.SEARCH_STEPS:
                         depends_on.append(f"step_{prev_idx}")
                         # Don't break - might need multiple search results
 

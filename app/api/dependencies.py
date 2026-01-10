@@ -202,8 +202,8 @@ async def get_orchestrator_for_user(
     calendar_service = CalendarService(db, credentials)
     drive_service = DriveService(db, credentials)
 
-    # Initialize agents
-    gmail_agent = GmailAgent(gmail_service, embedding_service)
+    # Initialize agents (GmailAgent needs LLM for email composition)
+    gmail_agent = GmailAgent(gmail_service, embedding_service, llm)
     gcal_agent = GcalAgent(calendar_service, embedding_service)
     gdrive_agent = GdriveAgent(drive_service, embedding_service)
 

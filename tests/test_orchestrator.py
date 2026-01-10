@@ -7,7 +7,7 @@ from uuid import uuid4
 from app.core.orchestrator import Orchestrator
 from app.core.planner import QueryPlanner, ExecutionPlan, ExecutionStep
 from app.core.intent import IntentClassifier
-from app.schemas.intent import ParsedIntent, ServiceType, StepType, StepResult
+from app.schemas.intent import ParsedIntent, ServiceType, StepType, StepResult, ExecutionStep as IntentExecutionStep
 
 
 class MockIntentClassifier:
@@ -47,7 +47,7 @@ def simple_intent():
         services=[ServiceType.GMAIL],
         operation="search",
         entities={"topic": "meeting notes"},
-        steps=[StepType.SEARCH_GMAIL],
+        steps=[IntentExecutionStep(step=StepType.SEARCH_GMAIL, params={"search_query": "meeting notes"})],
         confidence=0.95,
     )
 
@@ -59,7 +59,10 @@ def multi_service_intent():
         services=[ServiceType.GMAIL, ServiceType.GCAL],
         operation="search",
         entities={"topic": "project meeting"},
-        steps=[StepType.SEARCH_GMAIL, StepType.SEARCH_CALENDAR],
+        steps=[
+            IntentExecutionStep(step=StepType.SEARCH_GMAIL, params={"search_query": "project meeting"}),
+            IntentExecutionStep(step=StepType.SEARCH_CALENDAR, params={"search_query": "project meeting"}),
+        ],
         confidence=0.9,
     )
 
@@ -71,7 +74,10 @@ def action_intent():
         services=[ServiceType.GMAIL],
         operation="draft",
         entities={"action": "draft", "to": "test@example.com"},
-        steps=[StepType.SEARCH_GMAIL, StepType.DRAFT_EMAIL],
+        steps=[
+            IntentExecutionStep(step=StepType.SEARCH_GMAIL, params={"search_query": "email"}),
+            IntentExecutionStep(step=StepType.DRAFT_EMAIL, params={"message": "reply"}, depends_on=[0]),
+        ],
         confidence=0.85,
     )
 
@@ -261,16 +267,18 @@ def test_enrich_params_for_search(simple_intent):
 
     orchestrator = Orchestrator(classifier, planner, agents)
 
+    # Now params come from the step itself (LLM output)
     step = ExecutionStep(
         step_id=0,
         step=StepType.SEARCH_GMAIL,
         service=ServiceType.GMAIL,
-        params={},
+        params={"search_query": "meeting notes"},
         depends_on=[],
     )
 
     params = orchestrator._enrich_params(step, {}, simple_intent)
 
+    # search_query comes from step params, enrichment adds filters
     assert "search_query" in params
     assert "meeting notes" in params["search_query"]
     assert "filters" in params
@@ -282,7 +290,10 @@ def test_enrich_params_with_dependency_results():
         services=[ServiceType.GMAIL],
         operation="draft",
         entities={"action": "reply"},
-        steps=[StepType.SEARCH_GMAIL, StepType.DRAFT_EMAIL],
+        steps=[
+            IntentExecutionStep(step=StepType.SEARCH_GMAIL, params={"search_query": "hello"}),
+            IntentExecutionStep(step=StepType.DRAFT_EMAIL, params={"message": "reply"}, depends_on=[0]),
+        ],
         confidence=0.9,
     )
 
@@ -297,7 +308,7 @@ def test_enrich_params_with_dependency_results():
         step_id=1,
         step=StepType.DRAFT_EMAIL,
         service=ServiceType.GMAIL,
-        params={},
+        params={"message": "reply"},
         depends_on=[0],
     )
 
@@ -314,7 +325,7 @@ def test_enrich_params_with_dependency_results():
 
     params = orchestrator._enrich_params(step, {0: search_result}, intent)
 
-    # Should auto-fill from search results
-    assert params.get("to") == "test@example.com"
-    assert params.get("subject") == "Re: Hello"
+    # Should auto-fill email_id from search results
     assert params.get("email_id") == "msg1"
+    # Source data should be passed
+    assert params.get("source_data") is not None

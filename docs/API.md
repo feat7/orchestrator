@@ -234,6 +234,71 @@ curl -X POST http://localhost:8000/api/v1/query \
 
 ---
 
+### Search Quality Metrics
+
+#### GET /metrics/precision
+Run search quality benchmark and calculate Precision@5.
+
+This endpoint runs predefined benchmark queries against the user's synced data
+and calculates Precision@5 for search quality evaluation.
+
+**Target:** Precision@5 > 0.8 (assignment requirement)
+
+**Response:**
+```json
+{
+  "overall_precision_at_5": 0.85,
+  "target_precision": 0.8,
+  "meets_target": true,
+  "total_queries": 15,
+  "queries_evaluated": 12,
+  "queries_skipped": 3,
+  "per_service": {
+    "gmail": {
+      "precision_at_5": 0.87,
+      "queries_evaluated": 4,
+      "total_queries": 5
+    },
+    "gcal": {
+      "precision_at_5": 0.84,
+      "queries_evaluated": 4,
+      "total_queries": 5
+    },
+    "gdrive": {
+      "precision_at_5": 0.82,
+      "queries_evaluated": 4,
+      "total_queries": 5
+    }
+  },
+  "details": [
+    {
+      "query": "Turkish Airlines flight booking",
+      "service": "gmail",
+      "description": "Find emails about Turkish Airlines flights",
+      "precision_at_5": 1.0,
+      "relevant_count": 5,
+      "total_results": 10,
+      "top_5_results": [
+        {
+          "id": "msg123",
+          "title": "Turkish Airlines Booking Confirmation",
+          "is_relevant": true,
+          "score": 0.92
+        }
+      ]
+    }
+  ]
+}
+```
+
+**How Precision@5 is Calculated:**
+1. Run each benchmark query through the search system
+2. For each result in top-5, check if it matches relevance criteria (keywords in subject/body)
+3. Precision@5 = (# relevant in top 5) / 5
+4. Average across all queries for overall score
+
+---
+
 ## OpenAPI Specification
 
 Access the interactive API documentation at:

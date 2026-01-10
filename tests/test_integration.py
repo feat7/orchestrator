@@ -18,6 +18,10 @@ from app.schemas.intent import ParsedIntent, ServiceType, StepType, StepResult
 class MockLLMProvider(LLMProvider):
     """Mock LLM provider for integration tests."""
 
+    @property
+    def name(self) -> str:
+        return "mock"
+
     def __init__(self, intent_response: str = None, synthesis_response: str = None):
         self.intent_response = intent_response or '''{
             "services": ["gmail"],
@@ -49,7 +53,14 @@ class MockEmbeddingService:
 class MockGmailService:
     """Mock Gmail service for integration tests."""
 
-    async def search_emails(self, user_id, embedding, filters=None, limit=10):
+    async def search_emails(self, user_id, embedding, filters=None, limit=10, similarity_threshold=0.25):
+        return [
+            {"id": "msg1", "subject": "Team Meeting Notes", "sender": "colleague@example.com"},
+            {"id": "msg2", "subject": "Project Meeting Summary", "sender": "boss@example.com"},
+        ]
+
+    async def search_emails_bm25(self, user_id, query, filters=None, limit=20):
+        """BM25/full-text search for hybrid search."""
         return [
             {"id": "msg1", "subject": "Team Meeting Notes", "sender": "colleague@example.com"},
             {"id": "msg2", "subject": "Project Meeting Summary", "sender": "boss@example.com"},
@@ -59,16 +70,26 @@ class MockGmailService:
         return {"id": email_id, "subject": "Test Email", "body": "Email content"}
 
     async def create_draft(self, user_id, to, subject, body):
-        return {"draft_id": f"draft_{uuid4().hex[:8]}"}
+        return {"id": f"draft_{uuid4().hex[:8]}"}
 
     async def send_email(self, user_id, to, subject, body):
-        return {"message_id": f"msg_{uuid4().hex[:8]}"}
+        return {"message_id": f"msg_{uuid4().hex[:8]}", "status": "sent"}
+
+    async def send_draft(self, user_id, draft_id):
+        return {"id": f"sent_{uuid4().hex[:8]}", "status": "sent", "draft_id": draft_id}
 
 
 class MockCalendarService:
     """Mock Calendar service for integration tests."""
 
-    async def search_events(self, user_id, embedding, filters=None, limit=10):
+    async def search_events(self, user_id, embedding, filters=None, limit=10, similarity_threshold=0.25):
+        return [
+            {"id": "evt1", "title": "Team Standup", "start_time": "2024-01-15 09:00"},
+            {"id": "evt2", "title": "Project Review", "start_time": "2024-01-15 14:00"},
+        ]
+
+    async def search_events_bm25(self, user_id, query, filters=None, limit=20):
+        """BM25/full-text search for hybrid search."""
         return [
             {"id": "evt1", "title": "Team Standup", "start_time": "2024-01-15 09:00"},
             {"id": "evt2", "title": "Project Review", "start_time": "2024-01-15 14:00"},
@@ -90,7 +111,13 @@ class MockCalendarService:
 class MockDriveService:
     """Mock Drive service for integration tests."""
 
-    async def search_files(self, user_id, embedding, filters=None, limit=10):
+    async def search_files(self, user_id, embedding, filters=None, limit=10, similarity_threshold=0.25):
+        return [
+            {"id": "file1", "name": "Meeting Notes.docx", "mime_type": "application/vnd.google-apps.document"},
+        ]
+
+    async def search_files_bm25(self, user_id, query, filters=None, limit=20):
+        """BM25/full-text search for hybrid search."""
         return [
             {"id": "file1", "name": "Meeting Notes.docx", "mime_type": "application/vnd.google-apps.document"},
         ]
@@ -190,12 +217,14 @@ class TestFullQueryFlow:
     @pytest.mark.asyncio
     async def test_multi_service_search_flow(self, mock_llm, gmail_agent, gcal_agent):
         """Test multi-service search query end-to-end."""
-        # Configure LLM to return multi-service intent
+        # Configure LLM to return multi-service intent with ExecutionStep format
         mock_llm.intent_response = '''{
             "services": ["gmail", "gcal"],
             "operation": "search",
-            "entities": {"topic": "project meeting"},
-            "steps": ["search_gmail", "search_calendar"],
+            "steps": [
+                {"step": "search_gmail", "params": {"search_query": "project meeting"}},
+                {"step": "search_calendar", "params": {"search_query": "project meeting"}}
+            ],
             "confidence": 0.9
         }'''
 
@@ -221,12 +250,14 @@ class TestFullQueryFlow:
     @pytest.mark.asyncio
     async def test_action_flow_with_dependency(self, mock_llm, gmail_agent):
         """Test action flow that depends on search results."""
-        # Configure LLM to return action intent with search dependency
+        # Configure LLM to return action intent with ExecutionStep format
         mock_llm.intent_response = '''{
             "services": ["gmail"],
             "operation": "draft",
-            "entities": {"action": "reply"},
-            "steps": ["search_gmail", "draft_email"],
+            "steps": [
+                {"step": "search_gmail", "params": {"search_query": "meeting"}},
+                {"step": "draft_email", "params": {"message": "reply to meeting", "to_name": "test"}, "depends_on": [0]}
+            ],
             "confidence": 0.85
         }'''
 
@@ -339,6 +370,9 @@ class TestErrorHandling:
             async def search_emails(self, *args, **kwargs):
                 raise RuntimeError("Gmail API temporarily unavailable")
 
+            async def search_emails_bm25(self, *args, **kwargs):
+                raise RuntimeError("Gmail API temporarily unavailable")
+
         failing_agent = GmailAgent(FailingGmailService(), mock_embedding_service)
 
         classifier = IntentClassifier(mock_llm)
@@ -439,8 +473,10 @@ class TestEndToEndScenarios:
         mock_llm.intent_response = '''{
             "services": ["gmail", "gcal"],
             "operation": "search",
-            "entities": {"topic": "flight", "airline": "Turkish Airlines"},
-            "steps": ["search_gmail", "search_calendar"],
+            "steps": [
+                {"step": "search_gmail", "params": {"search_query": "Turkish Airlines flight booking"}},
+                {"step": "search_calendar", "params": {"search_query": "flight"}}
+            ],
             "confidence": 0.9
         }'''
 

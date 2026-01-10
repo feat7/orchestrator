@@ -1,11 +1,12 @@
 """Synchronization service for pulling data from Google APIs into local cache."""
 
+import logging
 import base64
 from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from google.oauth2.credentials import Credentials
@@ -14,6 +15,13 @@ from openai import OpenAI
 
 from app.db.models import User, GmailCache, GcalCache, GdriveCache, SyncStatus
 from app.config import settings
+from app.utils.resilience import (
+    google_api_call_with_retry,
+    TokenExpiredError,
+    QuotaExceededError,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class SyncService:
@@ -55,6 +63,54 @@ class SyncService:
             client_secret=settings.google_client_secret,
             scopes=settings.google_scopes,
         )
+
+    def _extract_file_content(self, service, file_id: str, mime_type: str) -> str:
+        """Extract text content from a Google Workspace file.
+
+        Uses export_media for Google Docs/Sheets/Slides, returns empty for others.
+
+        Args:
+            service: Google Drive API service
+            file_id: The file ID
+            mime_type: The file's MIME type
+
+        Returns:
+            Extracted text content or empty string
+        """
+        # Map Google Workspace MIME types to export formats
+        export_formats = {
+            "application/vnd.google-apps.document": "text/plain",
+            "application/vnd.google-apps.spreadsheet": "text/csv",
+            "application/vnd.google-apps.presentation": "text/plain",
+        }
+
+        export_mime = export_formats.get(mime_type)
+        if not export_mime:
+            # Not a Google Workspace file we can export
+            return ""
+
+        try:
+            # Export the file as text
+            content = google_api_call_with_retry(
+                lambda: service.files().export(
+                    fileId=file_id,
+                    mimeType=export_mime
+                ).execute()
+            )
+
+            if isinstance(content, bytes):
+                content = content.decode("utf-8", errors="ignore")
+
+            # Truncate if too long (for storage and embedding)
+            max_content_chars = 10000
+            if len(content) > max_content_chars:
+                content = content[:max_content_chars] + "..."
+
+            return content.strip()
+
+        except Exception as e:
+            logger.warning(f"Could not extract content from file {file_id}: {e}")
+            return ""
 
     def _generate_embedding(self, text: str) -> list[float]:
         """Generate embedding for text using OpenAI.
@@ -109,11 +165,14 @@ class SyncService:
         session.execute(stmt)
         session.commit()
 
-    def sync_gmail(self, max_results: int = 100) -> dict:
-        """Sync Gmail messages to local cache.
+    def sync_gmail(self, max_results: int = 500) -> dict:
+        """Sync Gmail messages to local cache (incremental).
+
+        Only generates embeddings for NEW emails not already in cache.
+        Uses pagination to fetch all emails up to max_results.
 
         Args:
-            max_results: Maximum number of messages to sync
+            max_results: Maximum number of messages to sync (default 500)
 
         Returns:
             Sync result with counts
@@ -128,25 +187,63 @@ class SyncService:
 
                 service = build("gmail", "v1", credentials=credentials)
 
-                # Get recent messages
-                results = service.users().messages().list(
-                    userId="me",
-                    maxResults=max_results,
-                    q="in:inbox OR in:sent",
-                ).execute()
+                # Get existing email IDs from cache to skip re-processing
+                existing_ids_result = session.execute(
+                    select(GmailCache.email_id).where(
+                        GmailCache.user_id == self.user_id
+                    )
+                )
+                existing_ids = set(row[0] for row in existing_ids_result)
+                logger.info(f"Found {len(existing_ids)} existing emails in cache")
 
-                messages = results.get("messages", [])
+                # Paginate through messages
+                all_messages = []
+                page_token = None
+
+                while len(all_messages) < max_results:
+                    page_size = min(100, max_results - len(all_messages))
+                    results = google_api_call_with_retry(
+                        lambda pt=page_token, ps=page_size: service.users().messages().list(
+                            userId="me",
+                            maxResults=ps,
+                            pageToken=pt,
+                            q="in:inbox OR in:sent",
+                        ).execute()
+                    )
+
+                    messages = results.get("messages", [])
+                    if not messages:
+                        break
+
+                    all_messages.extend(messages)
+                    page_token = results.get("nextPageToken")
+
+                    if not page_token:
+                        break
+
+                logger.info(f"Fetched {len(all_messages)} message refs from Gmail API")
+
                 synced_count = 0
+                skipped_count = 0
                 error_count = 0
 
-                for msg_ref in messages:
+                for msg_ref in all_messages:
+                    msg_id = msg_ref["id"]
+
+                    # Skip if already in cache (incremental sync)
+                    if msg_id in existing_ids:
+                        skipped_count += 1
+                        continue
+
                     try:
-                        # Get full message
-                        msg = service.users().messages().get(
-                            userId="me",
-                            id=msg_ref["id"],
-                            format="full",
-                        ).execute()
+                        # Get full message with retry
+                        msg = google_api_call_with_retry(
+                            lambda mid=msg_id: service.users().messages().get(
+                                userId="me",
+                                id=mid,
+                                format="full",
+                            ).execute()
+                        )
 
                         headers = {
                             h["name"]: h["value"]
@@ -187,7 +284,11 @@ class SyncService:
                             except Exception:
                                 pass
 
-                        # Upsert into cache
+                        # Create full-text search vector from subject + body
+                        # This enables BM25 keyword search
+                        search_text = f"{headers.get('Subject', '')} {body[:5000]}"
+
+                        # Insert new email (not upsert since we skip existing)
                         stmt = insert(GmailCache).values(
                             user_id=self.user_id,
                             email_id=msg["id"],
@@ -206,32 +307,32 @@ class SyncService:
                                 for p in payload.get("parts", [])
                             ),
                             synced_at=datetime.utcnow(),
+                            # Generate TSVECTOR for BM25 keyword search
+                            search_vector=func.to_tsvector("english", search_text),
                         )
-                        stmt = stmt.on_conflict_do_update(
-                            index_elements=["user_id", "email_id"],
-                            set_={
-                                "subject": stmt.excluded.subject,
-                                "sender": stmt.excluded.sender,
-                                "body_preview": stmt.excluded.body_preview,
-                                "body_full": stmt.excluded.body_full,
-                                "embedding": stmt.excluded.embedding,
-                                "labels": stmt.excluded.labels,
-                                "synced_at": datetime.utcnow(),
-                            },
+                        # Use on_conflict_do_nothing in case of race conditions
+                        stmt = stmt.on_conflict_do_nothing(
+                            index_elements=["user_id", "email_id"]
                         )
                         session.execute(stmt)
                         synced_count += 1
 
                     except Exception as e:
-                        print(f"Error syncing message {msg_ref['id']}: {e}")
+                        logger.error(f"Error syncing message {msg_id}: {e}")
                         error_count += 1
 
                 session.commit()
                 self._update_sync_status(session, "gmail", "completed")
 
+                logger.info(
+                    f"Gmail sync complete: {synced_count} new, "
+                    f"{skipped_count} skipped (already cached), {error_count} errors"
+                )
+
                 return {
                     "service": "gmail",
                     "synced": synced_count,
+                    "skipped": skipped_count,
                     "errors": error_count,
                     "status": "completed",
                 }
@@ -271,15 +372,17 @@ class SyncService:
                 time_min = (now - timedelta(days=days_back)).isoformat() + "Z"
                 time_max = (now + timedelta(days=days_ahead)).isoformat() + "Z"
 
-                # Get events
-                events_result = service.events().list(
-                    calendarId="primary",
-                    timeMin=time_min,
-                    timeMax=time_max,
-                    maxResults=250,
-                    singleEvents=True,
-                    orderBy="startTime",
-                ).execute()
+                # Get events with retry
+                events_result = google_api_call_with_retry(
+                    lambda: service.events().list(
+                        calendarId="primary",
+                        timeMin=time_min,
+                        timeMax=time_max,
+                        maxResults=250,
+                        singleEvents=True,
+                        orderBy="startTime",
+                    ).execute()
+                )
 
                 events = events_result.get("items", [])
                 synced_count = 0
@@ -379,11 +482,14 @@ class SyncService:
                     "error": str(e),
                 }
 
-    def sync_drive(self, max_results: int = 100) -> dict:
-        """Sync Google Drive files to local cache.
+    def sync_drive(self, max_results: int = 500) -> dict:
+        """Sync Google Drive files to local cache (incremental).
+
+        Only generates embeddings for NEW files not already in cache.
+        Uses pagination to fetch all files up to max_results.
 
         Args:
-            max_results: Maximum number of files to sync
+            max_results: Maximum number of files to sync (default 500)
 
         Returns:
             Sync result with counts
@@ -398,25 +504,73 @@ class SyncService:
 
                 service = build("drive", "v3", credentials=credentials)
 
-                # Get recent files
-                results = service.files().list(
-                    pageSize=max_results,
-                    fields="files(id, name, mimeType, webViewLink, modifiedTime, createdTime, owners, parents, description)",
-                    orderBy="modifiedTime desc",
-                    q="trashed = false",
-                ).execute()
+                # Get existing file IDs from cache to skip re-processing
+                existing_ids_result = session.execute(
+                    select(GdriveCache.file_id).where(
+                        GdriveCache.user_id == self.user_id
+                    )
+                )
+                existing_ids = set(row[0] for row in existing_ids_result)
+                logger.info(f"Found {len(existing_ids)} existing files in cache")
 
-                files = results.get("files", [])
+                # Paginate through files
+                all_files = []
+                page_token = None
+
+                while len(all_files) < max_results:
+                    page_size = min(100, max_results - len(all_files))
+                    results = google_api_call_with_retry(
+                        lambda pt=page_token, ps=page_size: service.files().list(
+                            pageSize=ps,
+                            pageToken=pt,
+                            fields="nextPageToken, files(id, name, mimeType, webViewLink, modifiedTime, createdTime, owners, parents, description)",
+                            orderBy="modifiedTime desc",
+                            q="trashed = false",
+                        ).execute()
+                    )
+
+                    files = results.get("files", [])
+                    if not files:
+                        break
+
+                    all_files.extend(files)
+                    page_token = results.get("nextPageToken")
+
+                    if not page_token:
+                        break
+
+                logger.info(f"Fetched {len(all_files)} files from Drive API")
+
                 synced_count = 0
+                skipped_count = 0
                 error_count = 0
 
-                for file in files:
+                for file in all_files:
+                    file_id = file["id"]
+
+                    # Skip if already in cache (incremental sync)
+                    if file_id in existing_ids:
+                        skipped_count += 1
+                        continue
+
                     try:
-                        # Create text for embedding
+                        # Extract file content for Google Workspace files
+                        mime_type = file.get("mimeType", "")
+                        content_preview = self._extract_file_content(
+                            service, file_id, mime_type
+                        )
+
+                        # Fall back to description if no content extracted
+                        if not content_preview:
+                            content_preview = file.get("description", "")
+
+                        # Create text for embedding (include content for better search)
                         embed_text = f"File: {file.get('name', 'Untitled')}\n"
-                        embed_text += f"Type: {file.get('mimeType', 'unknown')}\n"
+                        embed_text += f"Type: {mime_type}\n"
                         if file.get("description"):
                             embed_text += f"Description: {file['description']}\n"
+                        if content_preview:
+                            embed_text += f"Content: {content_preview[:5000]}\n"
 
                         embedding = self._generate_embedding(embed_text)
 
@@ -434,13 +588,14 @@ class SyncService:
 
                         owners = [o.get("emailAddress", "") for o in file.get("owners", [])]
 
-                        # Upsert into cache
+                        # Insert new file (not upsert since we skip existing)
+                        # Note: search_vector is auto-generated from name + content_preview
                         stmt = insert(GdriveCache).values(
                             user_id=self.user_id,
-                            file_id=file["id"],
+                            file_id=file_id,
                             name=file.get("name", "Untitled"),
-                            mime_type=file.get("mimeType", ""),
-                            content_preview=file.get("description", ""),
+                            mime_type=mime_type,
+                            content_preview=content_preview,
                             parent_folder=file.get("parents", [None])[0] if file.get("parents") else None,
                             web_link=file.get("webViewLink", ""),
                             owners=owners,
@@ -450,32 +605,29 @@ class SyncService:
                             modified_at=modified_at,
                             synced_at=datetime.utcnow(),
                         )
-                        stmt = stmt.on_conflict_do_update(
-                            index_elements=["user_id", "file_id"],
-                            set_={
-                                "name": stmt.excluded.name,
-                                "mime_type": stmt.excluded.mime_type,
-                                "content_preview": stmt.excluded.content_preview,
-                                "web_link": stmt.excluded.web_link,
-                                "owners": stmt.excluded.owners,
-                                "embedding": stmt.excluded.embedding,
-                                "modified_at": stmt.excluded.modified_at,
-                                "synced_at": datetime.utcnow(),
-                            },
+                        # Use on_conflict_do_nothing in case of race conditions
+                        stmt = stmt.on_conflict_do_nothing(
+                            index_elements=["user_id", "file_id"]
                         )
                         session.execute(stmt)
                         synced_count += 1
 
                     except Exception as e:
-                        print(f"Error syncing file {file.get('id')}: {e}")
+                        logger.error(f"Error syncing file {file_id}: {e}")
                         error_count += 1
 
                 session.commit()
                 self._update_sync_status(session, "gdrive", "completed")
 
+                logger.info(
+                    f"Drive sync complete: {synced_count} new, "
+                    f"{skipped_count} skipped (already cached), {error_count} errors"
+                )
+
                 return {
                     "service": "gdrive",
                     "synced": synced_count,
+                    "skipped": skipped_count,
                     "errors": error_count,
                     "status": "completed",
                 }
@@ -502,3 +654,50 @@ class SyncService:
             "drive": self.sync_drive(),
         }
         return results
+
+    def backfill_gmail_search_vectors(self) -> dict:
+        """Backfill search_vector for existing Gmail cache entries.
+
+        This updates emails that have NULL search_vector to enable
+        BM25 keyword search. Run this after updating the sync code
+        to populate search_vector for new emails.
+
+        Returns:
+            Dict with count of updated emails
+        """
+        with Session(self.engine) as session:
+            try:
+                # Update all emails with NULL search_vector for this user
+                from sqlalchemy import update, text
+
+                # Use raw SQL for the update since we need to reference columns
+                result = session.execute(
+                    text("""
+                        UPDATE gmail_cache
+                        SET search_vector = to_tsvector('english',
+                            COALESCE(subject, '') || ' ' || COALESCE(LEFT(body_full, 5000), '')
+                        )
+                        WHERE user_id = :user_id
+                        AND search_vector IS NULL
+                    """),
+                    {"user_id": str(self.user_id)},
+                )
+                session.commit()
+
+                updated_count = result.rowcount
+                logger.info(f"Backfilled search_vector for {updated_count} emails")
+
+                return {
+                    "service": "gmail_backfill",
+                    "updated": updated_count,
+                    "status": "completed",
+                }
+
+            except Exception as e:
+                logger.error(f"Error backfilling search vectors: {e}")
+                return {
+                    "service": "gmail_backfill",
+                    "updated": 0,
+                    "status": "error",
+                    "error": str(e),
+                }

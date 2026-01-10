@@ -90,3 +90,33 @@ class MetricsResponse(BaseModel):
         default=None,
         description="Precision@5 for search results"
     )
+
+
+class UserSettingsResponse(BaseModel):
+    """User settings response."""
+
+    autosync_enabled: bool = Field(
+        default=False,
+        description="Whether automatic sync is enabled"
+    )
+    sync_interval_minutes: int = Field(
+        default=15,
+        description="How often to sync (15, 30, or 60 minutes)"
+    )
+    last_sync_at: Optional[datetime] = Field(
+        default=None,
+        description="When the last sync occurred"
+    )
+
+
+class UserSettingsUpdateRequest(BaseModel):
+    """Request to update user settings."""
+
+    autosync_enabled: Optional[bool] = Field(
+        default=None,
+        description="Enable or disable automatic sync"
+    )
+    sync_interval_minutes: Optional[int] = Field(
+        default=None,
+        description="Sync interval in minutes (15, 30, or 60)"
+    )
