@@ -237,7 +237,10 @@ class CalendarService:
         return events
 
     async def get_event(self, user_id: str, event_id: str) -> Optional[dict]:
-        """Get full event details.
+        """Get full event details from local cache.
+
+        Always uses the local cache (populated by sync) for read operations.
+        This avoids unnecessary API calls and provides consistent fast responses.
 
         Args:
             user_id: The user's ID
@@ -246,30 +249,7 @@ class CalendarService:
         Returns:
             Event data dictionary or None
         """
-        if not settings.use_mock_google and self.service:
-            try:
-                event = self.service.events().get(
-                    calendarId="primary",
-                    eventId=event_id,
-                ).execute()
-
-                return {
-                    "id": event["id"],
-                    "calendar_id": "primary",
-                    "title": event.get("summary", "Untitled Event"),
-                    "description": event.get("description", ""),
-                    "start_time": event["start"].get("dateTime", event["start"].get("date")),
-                    "end_time": event["end"].get("dateTime", event["end"].get("date")),
-                    "attendees": [a["email"] for a in event.get("attendees", [])],
-                    "location": event.get("location", ""),
-                    "meeting_link": event.get("hangoutLink", ""),
-                    "status": event.get("status", "confirmed"),
-                }
-            except Exception as e:
-                print(f"Calendar API error: {e}")
-                return None
-
-        # Mock mode: use local cache
+        # Always use local cache for read operations
         result = await self.db.execute(
             select(GcalCache).where(
                 GcalCache.user_id == uuid.UUID(user_id),

@@ -5,11 +5,15 @@ from unittest.mock import AsyncMock
 
 from app.core.synthesizer import ResponseSynthesizer
 from app.core.llm import LLMProvider
-from app.schemas.intent import ParsedIntent, ServiceType, StepType, StepResult
+from app.schemas.intent import ParsedIntent, ServiceType, StepType, StepResult, ExecutionStep
 
 
 class MockLLMProvider(LLMProvider):
     """Mock LLM provider for testing."""
+
+    @property
+    def name(self) -> str:
+        return "mock"
 
     def __init__(self, response: str = "Mock response"):
         self.response = response
@@ -36,7 +40,7 @@ def simple_intent():
         services=[ServiceType.GMAIL],
         operation="search",
         entities={"topic": "meeting"},
-        steps=[StepType.SEARCH_GMAIL],
+        steps=[ExecutionStep(step=StepType.SEARCH_GMAIL, params={"search_query": "meeting"})],
         confidence=0.95,
     )
 
@@ -48,7 +52,10 @@ def multi_service_intent():
         services=[ServiceType.GMAIL, ServiceType.GCAL],
         operation="search",
         entities={"topic": "project"},
-        steps=[StepType.SEARCH_GMAIL, StepType.SEARCH_CALENDAR],
+        steps=[
+            ExecutionStep(step=StepType.SEARCH_GMAIL, params={"search_query": "project"}),
+            ExecutionStep(step=StepType.SEARCH_CALENDAR, params={"search_query": "project"})
+        ],
         confidence=0.9,
     )
 
@@ -175,7 +182,7 @@ async def test_synthesize_with_draft_created(mock_llm):
         services=[ServiceType.GMAIL],
         operation="draft",
         entities={"to": "test@example.com"},
-        steps=[StepType.DRAFT_EMAIL],
+        steps=[ExecutionStep(step=StepType.DRAFT_EMAIL, params={"to": "test@example.com", "message": "Hello"})],
         confidence=0.9,
     )
 
@@ -286,6 +293,7 @@ def test_format_results_file_items(mock_llm):
                         "id": "f1",
                         "name": "Project Proposal.pdf",
                         "mime_type": "application/pdf",
+                        "web_link": "https://drive.google.com/file/d/f1/view",
                     }
                 ]
             },
@@ -297,6 +305,8 @@ def test_format_results_file_items(mock_llm):
     assert "SUCCESS" in formatted
     assert "Project Proposal.pdf" in formatted
     assert "application/pdf" in formatted
+    # Should include web link for clicking
+    assert "https://drive.google.com/file/d/f1/view" in formatted
 
 
 def test_format_results_action_results(mock_llm):
@@ -326,6 +336,38 @@ def test_format_results_action_results(mock_llm):
     assert "draft123" in formatted
     assert "msg456" in formatted
     assert "deleted successfully" in formatted
+
+
+def test_format_results_file_content(mock_llm):
+    """Test formatting get_file results with content_preview."""
+    synthesizer = ResponseSynthesizer(mock_llm)
+
+    # This simulates get_file returning file data with content
+    results = [
+        StepResult(
+            step=StepType.GET_FILE,
+            success=True,
+            data={
+                "id": "file123",
+                "name": "Orchestator",
+                "mime_type": "application/vnd.google-apps.document",
+                "content_preview": "This is a simple drive file to test orchestrator.",
+                "modified_at": "2026-01-09T10:00:00",
+                "web_link": "https://docs.google.com/document/d/file123",
+            },
+        )
+    ]
+
+    formatted = synthesizer._format_results(results)
+
+    # Should show file name
+    assert "Orchestator" in formatted
+    # Should show CONTENT section
+    assert "CONTENT" in formatted
+    # Should show the actual file content
+    assert "simple drive file to test orchestrator" in formatted
+    # Should show the web link for opening in browser
+    assert "https://docs.google.com/document/d/file123" in formatted
 
 
 def test_format_item_generic(mock_llm):

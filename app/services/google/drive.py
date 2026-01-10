@@ -2,7 +2,7 @@
 
 from typing import Optional
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +40,7 @@ class DriveService:
         embedding: list[float],
         filters: Optional[dict] = None,
         limit: int = 10,
-        similarity_threshold: float = 0.25,
+        similarity_threshold: float = 0.35,
     ) -> list[dict]:
         """Search files using local cache with vector similarity.
 
@@ -50,7 +50,7 @@ class DriveService:
         Args:
             user_id: The user's ID
             embedding: Query embedding vector
-            filters: Optional filters (mime_type, modified_date, name)
+            filters: Optional filters (mime_type, time_range, modified_after, name)
             limit: Max results to return
             similarity_threshold: Minimum similarity score (0-1) to include results
 
@@ -78,14 +78,58 @@ class DriveService:
                 query = query.where(
                     GdriveCache.name.ilike(f"%{filters['name']}%")
                 )
+
+            # Handle time_range strings (convert to dates)
+            now = datetime.utcnow()
+            time_range = filters.get("time_range")
+            if time_range == "last_week" or time_range == "last week":
+                query = query.where(
+                    GdriveCache.modified_at >= now - timedelta(days=7)
+                )
+            elif time_range == "this_week" or time_range == "this week":
+                # Start of this week (Monday)
+                start_of_week = now - timedelta(days=now.weekday())
+                start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+                query = query.where(
+                    GdriveCache.modified_at >= start_of_week
+                )
+            elif time_range == "today":
+                start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                query = query.where(
+                    GdriveCache.modified_at >= start_of_day
+                )
+            elif time_range == "yesterday":
+                start_of_yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                end_of_yesterday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                query = query.where(
+                    GdriveCache.modified_at >= start_of_yesterday,
+                    GdriveCache.modified_at < end_of_yesterday
+                )
+            elif time_range == "recent":
+                # Last 30 days
+                query = query.where(
+                    GdriveCache.modified_at >= now - timedelta(days=30)
+                )
+
+            # Handle ISO date string filters (from LLM)
             if filters.get("modified_after"):
-                query = query.where(
-                    GdriveCache.modified_at >= filters["modified_after"]
-                )
+                modified_after = filters["modified_after"]
+                if isinstance(modified_after, str):
+                    # Parse ISO date string (e.g., "2025-12-11" or "2025-12-11T00:00:00")
+                    try:
+                        modified_after = datetime.fromisoformat(modified_after.replace("Z", "+00:00"))
+                    except ValueError:
+                        modified_after = datetime.strptime(modified_after, "%Y-%m-%d")
+                query = query.where(GdriveCache.modified_at >= modified_after)
+
             if filters.get("modified_before"):
-                query = query.where(
-                    GdriveCache.modified_at <= filters["modified_before"]
-                )
+                modified_before = filters["modified_before"]
+                if isinstance(modified_before, str):
+                    try:
+                        modified_before = datetime.fromisoformat(modified_before.replace("Z", "+00:00"))
+                    except ValueError:
+                        modified_before = datetime.strptime(modified_before, "%Y-%m-%d")
+                query = query.where(GdriveCache.modified_at <= modified_before)
 
         # Order by similarity (descending) and limit
         query = query.order_by(distance_expr).limit(limit * 2)
@@ -116,6 +160,108 @@ class DriveService:
 
             if len(files) >= limit:
                 break
+
+        return files
+
+    async def search_files_filter_only(
+        self,
+        user_id: str,
+        filters: dict,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Search files using only metadata filters (no semantic search).
+
+        Used when there's no search query but filters exist (e.g., "files from this week").
+        Returns files sorted by modified date descending.
+
+        Args:
+            user_id: The user's ID
+            filters: Filters (mime_type, time_range, name, modified_after, modified_before)
+            limit: Max results to return
+
+        Returns:
+            List of matching files sorted by recency
+        """
+        query = select(GdriveCache).where(
+            GdriveCache.user_id == uuid.UUID(user_id)
+        )
+
+        # Apply filters
+        if filters.get("mime_type"):
+            query = query.where(
+                GdriveCache.mime_type.ilike(f"%{filters['mime_type']}%")
+            )
+        if filters.get("name"):
+            query = query.where(
+                GdriveCache.name.ilike(f"%{filters['name']}%")
+            )
+
+        # Handle time_range strings (convert to dates)
+        now = datetime.utcnow()
+        time_range = filters.get("time_range")
+        if time_range == "last_week" or time_range == "last week":
+            query = query.where(
+                GdriveCache.modified_at >= now - timedelta(days=7)
+            )
+        elif time_range == "this_week" or time_range == "this week":
+            start_of_week = now - timedelta(days=now.weekday())
+            start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.where(
+                GdriveCache.modified_at >= start_of_week
+            )
+        elif time_range == "today":
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.where(
+                GdriveCache.modified_at >= start_of_day
+            )
+        elif time_range == "yesterday":
+            start_of_yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_yesterday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.where(
+                GdriveCache.modified_at >= start_of_yesterday,
+                GdriveCache.modified_at < end_of_yesterday
+            )
+        elif time_range == "recent":
+            query = query.where(
+                GdriveCache.modified_at >= now - timedelta(days=30)
+            )
+
+        # Handle ISO date string filters (from LLM)
+        if filters.get("modified_after"):
+            modified_after = filters["modified_after"]
+            if isinstance(modified_after, str):
+                try:
+                    modified_after = datetime.fromisoformat(modified_after.replace("Z", "+00:00"))
+                except ValueError:
+                    modified_after = datetime.strptime(modified_after, "%Y-%m-%d")
+            query = query.where(GdriveCache.modified_at >= modified_after)
+
+        if filters.get("modified_before"):
+            modified_before = filters["modified_before"]
+            if isinstance(modified_before, str):
+                try:
+                    modified_before = datetime.fromisoformat(modified_before.replace("Z", "+00:00"))
+                except ValueError:
+                    modified_before = datetime.strptime(modified_before, "%Y-%m-%d")
+            query = query.where(GdriveCache.modified_at <= modified_before)
+
+        # Sort by modified date descending (most recent first)
+        query = query.order_by(GdriveCache.modified_at.desc()).limit(limit)
+
+        result = await self.db.execute(query)
+        rows = result.scalars().all()
+
+        files = []
+        for file in rows:
+            files.append({
+                "id": str(file.file_id),
+                "name": file.name,
+                "mime_type": file.mime_type,
+                "content_preview": file.content_preview,
+                "web_link": file.web_link,
+                "modified_at": file.modified_at.isoformat() if file.modified_at else None,
+                "owners": file.owners,
+            })
 
         return files
 
@@ -164,14 +310,55 @@ class DriveService:
                 query_stmt = query_stmt.where(
                     GdriveCache.name.ilike(f"%{filters['name']}%")
                 )
+
+            # Handle time_range strings (convert to dates)
+            now = datetime.utcnow()
+            time_range = filters.get("time_range")
+            if time_range == "last_week" or time_range == "last week":
+                query_stmt = query_stmt.where(
+                    GdriveCache.modified_at >= now - timedelta(days=7)
+                )
+            elif time_range == "this_week" or time_range == "this week":
+                start_of_week = now - timedelta(days=now.weekday())
+                start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+                query_stmt = query_stmt.where(
+                    GdriveCache.modified_at >= start_of_week
+                )
+            elif time_range == "today":
+                start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                query_stmt = query_stmt.where(
+                    GdriveCache.modified_at >= start_of_day
+                )
+            elif time_range == "yesterday":
+                start_of_yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                end_of_yesterday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                query_stmt = query_stmt.where(
+                    GdriveCache.modified_at >= start_of_yesterday,
+                    GdriveCache.modified_at < end_of_yesterday
+                )
+            elif time_range == "recent":
+                query_stmt = query_stmt.where(
+                    GdriveCache.modified_at >= now - timedelta(days=30)
+                )
+
+            # Handle ISO date string filters (from LLM)
             if filters.get("modified_after"):
-                query_stmt = query_stmt.where(
-                    GdriveCache.modified_at >= filters["modified_after"]
-                )
+                modified_after = filters["modified_after"]
+                if isinstance(modified_after, str):
+                    try:
+                        modified_after = datetime.fromisoformat(modified_after.replace("Z", "+00:00"))
+                    except ValueError:
+                        modified_after = datetime.strptime(modified_after, "%Y-%m-%d")
+                query_stmt = query_stmt.where(GdriveCache.modified_at >= modified_after)
+
             if filters.get("modified_before"):
-                query_stmt = query_stmt.where(
-                    GdriveCache.modified_at <= filters["modified_before"]
-                )
+                modified_before = filters["modified_before"]
+                if isinstance(modified_before, str):
+                    try:
+                        modified_before = datetime.fromisoformat(modified_before.replace("Z", "+00:00"))
+                    except ValueError:
+                        modified_before = datetime.strptime(modified_before, "%Y-%m-%d")
+                query_stmt = query_stmt.where(GdriveCache.modified_at <= modified_before)
 
         query_stmt = (
             query_stmt
@@ -201,7 +388,10 @@ class DriveService:
         return files
 
     async def get_file(self, user_id: str, file_id: str) -> Optional[dict]:
-        """Get full file metadata and content preview.
+        """Get full file metadata and content preview from local cache.
+
+        Always uses the local cache (populated by sync) for read operations.
+        This avoids unnecessary API calls and provides consistent fast responses.
 
         Args:
             user_id: The user's ID
@@ -210,34 +400,7 @@ class DriveService:
         Returns:
             File data dictionary or None
         """
-        if not settings.use_mock_google and self.service:
-            try:
-                file = self.service.files().get(
-                    fileId=file_id,
-                    fields="id, name, mimeType, webViewLink, modifiedTime, createdTime, owners, parents, description, permissions",
-                ).execute()
-
-                return {
-                    "id": file["id"],
-                    "name": file.get("name", "Untitled"),
-                    "mime_type": file.get("mimeType", ""),
-                    "content_preview": file.get("description", ""),
-                    "parent_folder": file.get("parents", [None])[0],
-                    "web_link": file.get("webViewLink", ""),
-                    "owners": [o.get("emailAddress", "") for o in file.get("owners", [])],
-                    "shared_with": [
-                        p.get("emailAddress", "")
-                        for p in file.get("permissions", [])
-                        if p.get("emailAddress")
-                    ],
-                    "created_at": file.get("createdTime"),
-                    "modified_at": file.get("modifiedTime"),
-                }
-            except Exception as e:
-                print(f"Drive API error: {e}")
-                return None
-
-        # Mock mode: use local cache
+        # Always use local cache for read operations
         result = await self.db.execute(
             select(GdriveCache).where(
                 GdriveCache.user_id == uuid.UUID(user_id),

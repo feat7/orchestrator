@@ -33,14 +33,29 @@ class GdriveAgent(BaseAgent):
 
         Results are fused using Reciprocal Rank Fusion (RRF).
 
+        When query is empty but filters exist (e.g., "files from this week"),
+        falls back to filter-only search without semantic matching.
+
         Args:
             query: The search query
             user_id: The user's ID
-            filters: Optional filters (mime_type, modified_date)
+            filters: Optional filters (mime_type, time_range, modified_date)
 
         Returns:
             List of matching files, ranked by RRF score
         """
+        # Handle empty/minimal queries with filters (e.g., "files from this week")
+        # In this case, do a filter-only search without semantic matching
+        if not query or not query.strip():
+            if filters:
+                return await self.drive.search_files_filter_only(
+                    user_id=user_id,
+                    filters=filters,
+                    limit=20,
+                )
+            # No query and no filters - return empty
+            return []
+
         query_embedding = await self.embeddings.embed(query)
 
         # 1. BM25 search - also apply filters

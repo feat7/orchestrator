@@ -25,11 +25,12 @@ celery_app.conf.update(
     result_expires=3600,  # Results expire after 1 hour
 )
 
-# Optional: Configure periodic tasks (beat schedule)
+# Configure periodic tasks (beat schedule)
+# Runs every 5 minutes to check for users with autosync enabled
+# The sync_all_users task respects user's sync_interval_minutes setting
 celery_app.conf.beat_schedule = {
-    # Example: Run sync every hour for all users
-    # "periodic-sync": {
-    #     "task": "app.tasks.sync_tasks.sync_all_users",
-    #     "schedule": 3600.0,  # Every hour
-    # },
+    "periodic-sync-check": {
+        "task": "sync.all_users",
+        "schedule": 300.0,  # Check every 5 minutes
+    },
 }

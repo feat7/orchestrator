@@ -1,9 +1,22 @@
 """Main FastAPI application for Google Workspace Orchestrator."""
 
+import logging
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+
+# Configure logging - must be done before importing other app modules
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stdout,
+)
+# Set specific loggers to INFO level
+logging.getLogger("app").setLevel(logging.INFO)
+logging.getLogger("app.core.intent").setLevel(logging.INFO)
+logging.getLogger("app.api.routes").setLevel(logging.INFO)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse

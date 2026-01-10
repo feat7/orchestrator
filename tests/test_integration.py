@@ -18,6 +18,10 @@ from app.schemas.intent import ParsedIntent, ServiceType, StepType, StepResult
 class MockLLMProvider(LLMProvider):
     """Mock LLM provider for integration tests."""
 
+    @property
+    def name(self) -> str:
+        return "mock"
+
     def __init__(self, intent_response: str = None, synthesis_response: str = None):
         self.intent_response = intent_response or '''{
             "services": ["gmail"],
@@ -213,12 +217,14 @@ class TestFullQueryFlow:
     @pytest.mark.asyncio
     async def test_multi_service_search_flow(self, mock_llm, gmail_agent, gcal_agent):
         """Test multi-service search query end-to-end."""
-        # Configure LLM to return multi-service intent
+        # Configure LLM to return multi-service intent with ExecutionStep format
         mock_llm.intent_response = '''{
             "services": ["gmail", "gcal"],
             "operation": "search",
-            "entities": {"topic": "project meeting"},
-            "steps": ["search_gmail", "search_calendar"],
+            "steps": [
+                {"step": "search_gmail", "params": {"search_query": "project meeting"}},
+                {"step": "search_calendar", "params": {"search_query": "project meeting"}}
+            ],
             "confidence": 0.9
         }'''
 
@@ -244,12 +250,14 @@ class TestFullQueryFlow:
     @pytest.mark.asyncio
     async def test_action_flow_with_dependency(self, mock_llm, gmail_agent):
         """Test action flow that depends on search results."""
-        # Configure LLM to return action intent with search dependency
+        # Configure LLM to return action intent with ExecutionStep format
         mock_llm.intent_response = '''{
             "services": ["gmail"],
             "operation": "draft",
-            "entities": {"action": "reply"},
-            "steps": ["search_gmail", "draft_email"],
+            "steps": [
+                {"step": "search_gmail", "params": {"search_query": "meeting"}},
+                {"step": "draft_email", "params": {"message": "reply to meeting", "to_name": "test"}, "depends_on": [0]}
+            ],
             "confidence": 0.85
         }'''
 
@@ -465,8 +473,10 @@ class TestEndToEndScenarios:
         mock_llm.intent_response = '''{
             "services": ["gmail", "gcal"],
             "operation": "search",
-            "entities": {"topic": "flight", "airline": "Turkish Airlines"},
-            "steps": ["search_gmail", "search_calendar"],
+            "steps": [
+                {"step": "search_gmail", "params": {"search_query": "Turkish Airlines flight booking"}},
+                {"step": "search_calendar", "params": {"search_query": "flight"}}
+            ],
             "confidence": 0.9
         }'''
 

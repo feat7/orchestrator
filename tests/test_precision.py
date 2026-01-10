@@ -160,17 +160,17 @@ class TestBenchmarkQueries:
 
     def test_gmail_benchmark_relevance(self):
         """Test Gmail benchmark relevance checks work."""
-        # Find a Gmail benchmark query
+        # Find a Gmail benchmark query (ComfyUI workflow)
         gmail_query = next(
             q for q in SEARCH_BENCHMARK
-            if q.service == "gmail" and "Turkish" in q.query
+            if q.service == "gmail" and "ComfyUI" in q.query
         )
 
         # Test relevant result
         relevant_result = {
-            "subject": "Turkish Airlines Booking Confirmation",
-            "body_preview": "Your flight has been booked",
-            "sender": "booking@turkishairlines.com",
+            "subject": "ComfyUI Workflow Update - New Features",
+            "body_preview": "Check out the latest workflow improvements",
+            "sender": "updates@example.com",
         }
         assert gmail_query.relevance_check(relevant_result) is True
 
@@ -206,16 +206,17 @@ class TestBenchmarkQueries:
 
     def test_drive_benchmark_relevance(self):
         """Test Drive benchmark relevance checks work."""
-        # Find a drive benchmark query
+        # Find a drive benchmark query (project document)
         drive_query = next(
             q for q in SEARCH_BENCHMARK
-            if q.service == "gdrive" and "proposal" in q.query.lower()
+            if q.service == "gdrive" and "project" in q.query.lower()
         )
 
         # Test relevant result
         relevant_result = {
-            "name": "Project Proposal 2024.docx",
-            "content_preview": "This proposal outlines...",
+            "name": "Project Document 2024.docx",
+            "content_preview": "This project outlines...",
+            "mime_type": "application/vnd.google-apps.document",
         }
         assert drive_query.relevance_check(relevant_result) is True
 
@@ -223,6 +224,7 @@ class TestBenchmarkQueries:
         irrelevant_result = {
             "name": "vacation_photos.jpg",
             "content_preview": "",
+            "mime_type": "image/jpeg",
         }
         assert drive_query.relevance_check(irrelevant_result) is False
 

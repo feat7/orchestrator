@@ -62,14 +62,29 @@ class GmailAgent(BaseAgent):
 
         Results are fused using Reciprocal Rank Fusion (RRF) - no neural models.
 
+        When query is empty but filters exist (e.g., "emails from last week"),
+        falls back to filter-only search without semantic matching.
+
         Args:
             query: The search query
             user_id: The user's ID
-            filters: Optional filters (sender, date_range, labels)
+            filters: Optional filters (sender, time_range, date_range, labels)
 
         Returns:
             List of matching emails, ranked by RRF score
         """
+        # Handle empty/minimal queries with filters (e.g., "emails from last week")
+        # In this case, do a filter-only search without semantic matching
+        if not query or not query.strip():
+            if filters:
+                return await self.gmail.search_emails_filter_only(
+                    user_id=user_id,
+                    filters=filters,
+                    limit=20,
+                )
+            # No query and no filters - return empty
+            return []
+
         # Generate embedding for semantic search
         query_embedding = await self.embeddings.embed(query)
 

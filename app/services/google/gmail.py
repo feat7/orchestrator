@@ -3,7 +3,7 @@
 from typing import Optional
 import uuid
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 
 from sqlalchemy import select, func, text
@@ -42,7 +42,7 @@ class GmailService:
         embedding: list[float],
         filters: Optional[dict] = None,
         limit: int = 10,
-        similarity_threshold: float = 0.25,
+        similarity_threshold: float = 0.35,
     ) -> list[dict]:
         """Search emails using local cache with vector similarity.
 
@@ -86,6 +86,36 @@ class GmailService:
             if filters.get("subject"):
                 query = query.where(
                     GmailCache.subject.ilike(f"%{filters['subject']}%")
+                )
+
+            # Handle time_range strings (convert to dates)
+            now = datetime.utcnow()
+            time_range = filters.get("time_range")
+            if time_range == "last_week" or time_range == "last week":
+                query = query.where(
+                    GmailCache.received_at >= now - timedelta(days=7)
+                )
+            elif time_range == "this_week" or time_range == "this week":
+                start_of_week = now - timedelta(days=now.weekday())
+                start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+                query = query.where(
+                    GmailCache.received_at >= start_of_week
+                )
+            elif time_range == "today":
+                start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                query = query.where(
+                    GmailCache.received_at >= start_of_day
+                )
+            elif time_range == "yesterday":
+                start_of_yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                end_of_yesterday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                query = query.where(
+                    GmailCache.received_at >= start_of_yesterday,
+                    GmailCache.received_at < end_of_yesterday
+                )
+            elif time_range == "recent":
+                query = query.where(
+                    GmailCache.received_at >= now - timedelta(days=30)
                 )
 
         # Order by similarity (descending) and limit
@@ -178,6 +208,36 @@ class GmailService:
                     GmailCache.subject.ilike(f"%{filters['subject']}%")
                 )
 
+            # Handle time_range strings (convert to dates)
+            now = datetime.utcnow()
+            time_range = filters.get("time_range")
+            if time_range == "last_week" or time_range == "last week":
+                query_stmt = query_stmt.where(
+                    GmailCache.received_at >= now - timedelta(days=7)
+                )
+            elif time_range == "this_week" or time_range == "this week":
+                start_of_week = now - timedelta(days=now.weekday())
+                start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+                query_stmt = query_stmt.where(
+                    GmailCache.received_at >= start_of_week
+                )
+            elif time_range == "today":
+                start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                query_stmt = query_stmt.where(
+                    GmailCache.received_at >= start_of_day
+                )
+            elif time_range == "yesterday":
+                start_of_yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                end_of_yesterday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                query_stmt = query_stmt.where(
+                    GmailCache.received_at >= start_of_yesterday,
+                    GmailCache.received_at < end_of_yesterday
+                )
+            elif time_range == "recent":
+                query_stmt = query_stmt.where(
+                    GmailCache.received_at >= now - timedelta(days=30)
+                )
+
         query_stmt = (
             query_stmt
             .order_by(func.ts_rank(GmailCache.search_vector, tsquery).desc())
@@ -205,8 +265,98 @@ class GmailService:
 
         return emails
 
+    async def search_emails_filter_only(
+        self,
+        user_id: str,
+        filters: dict,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Search emails using only metadata filters (no semantic search).
+
+        Used when there's no search query but filters exist (e.g., "emails from last week").
+        Returns emails sorted by received date descending.
+
+        Args:
+            user_id: The user's ID
+            filters: Filters (sender, time_range, subject, date_from, date_to)
+            limit: Max results to return
+
+        Returns:
+            List of matching emails sorted by recency
+        """
+        query = select(GmailCache).where(
+            GmailCache.user_id == uuid.UUID(user_id)
+        )
+
+        # Apply filters
+        if filters.get("sender"):
+            query = query.where(
+                GmailCache.sender.ilike(f"%{filters['sender']}%")
+            )
+        if filters.get("date_from"):
+            query = query.where(GmailCache.received_at >= filters["date_from"])
+        if filters.get("date_to"):
+            query = query.where(GmailCache.received_at <= filters["date_to"])
+        if filters.get("subject"):
+            query = query.where(
+                GmailCache.subject.ilike(f"%{filters['subject']}%")
+            )
+
+        # Handle time_range strings (convert to dates)
+        now = datetime.utcnow()
+        time_range = filters.get("time_range")
+        if time_range == "last_week" or time_range == "last week":
+            query = query.where(
+                GmailCache.received_at >= now - timedelta(days=7)
+            )
+        elif time_range == "this_week" or time_range == "this week":
+            start_of_week = now - timedelta(days=now.weekday())
+            start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.where(
+                GmailCache.received_at >= start_of_week
+            )
+        elif time_range == "today":
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.where(
+                GmailCache.received_at >= start_of_day
+            )
+        elif time_range == "yesterday":
+            start_of_yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_yesterday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.where(
+                GmailCache.received_at >= start_of_yesterday,
+                GmailCache.received_at < end_of_yesterday
+            )
+        elif time_range == "recent":
+            query = query.where(
+                GmailCache.received_at >= now - timedelta(days=30)
+            )
+
+        # Sort by received date descending (most recent first)
+        query = query.order_by(GmailCache.received_at.desc()).limit(limit)
+
+        result = await self.db.execute(query)
+        rows = result.scalars().all()
+
+        emails = []
+        for email in rows:
+            emails.append({
+                "id": str(email.email_id),
+                "subject": email.subject,
+                "sender": email.sender,
+                "body_preview": email.body_preview,
+                "received_at": email.received_at.isoformat() if email.received_at else None,
+                "labels": email.labels,
+                "has_attachments": email.has_attachments,
+            })
+
+        return emails
+
     async def get_email(self, user_id: str, email_id: str) -> Optional[dict]:
-        """Get full email content.
+        """Get full email content from local cache.
+
+        Always uses the local cache (populated by sync) for read operations.
+        This avoids unnecessary API calls and provides consistent fast responses.
 
         Args:
             user_id: The user's ID
@@ -215,45 +365,7 @@ class GmailService:
         Returns:
             Email data dictionary or None
         """
-        if not settings.use_mock_google and self.service:
-            try:
-                message = self.service.users().messages().get(
-                    userId="me",
-                    id=email_id,
-                    format="full",
-                ).execute()
-
-                headers = {h["name"]: h["value"] for h in message.get("payload", {}).get("headers", [])}
-
-                # Extract body
-                body = ""
-                payload = message.get("payload", {})
-                if "body" in payload and payload["body"].get("data"):
-                    body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
-                elif "parts" in payload:
-                    for part in payload["parts"]:
-                        if part.get("mimeType") == "text/plain" and part.get("body", {}).get("data"):
-                            body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
-                            break
-
-                return {
-                    "id": email_id,
-                    "thread_id": message.get("threadId"),
-                    "subject": headers.get("Subject", "No Subject"),
-                    "sender": headers.get("From", "Unknown"),
-                    "recipients": headers.get("To", "").split(","),
-                    "body": body,
-                    "received_at": headers.get("Date"),
-                    "labels": message.get("labelIds", []),
-                    "has_attachments": any(
-                        part.get("filename") for part in payload.get("parts", [])
-                    ),
-                }
-            except Exception as e:
-                print(f"Gmail API error: {e}")
-                return None
-
-        # Mock mode: return from cache
+        # Always use local cache for read operations
         result = await self.db.execute(
             select(GmailCache).where(
                 GmailCache.user_id == uuid.UUID(user_id),

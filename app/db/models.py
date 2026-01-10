@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Index, Boolean, Computed
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Index, Boolean, Computed, Integer
 from sqlalchemy.dialects.postgresql import UUID, JSONB, TSVECTOR
 from pgvector.sqlalchemy import Vector
 from datetime import datetime
@@ -8,7 +8,7 @@ from app.db.database import Base
 
 
 class User(Base):
-    """User model with Google OAuth tokens."""
+    """User model with Google OAuth tokens and sync preferences."""
 
     __tablename__ = "users"
 
@@ -17,6 +17,12 @@ class User(Base):
     google_access_token = Column(Text)
     google_refresh_token = Column(Text)
     token_expires_at = Column(DateTime)
+
+    # Sync preferences
+    autosync_enabled = Column(Boolean, default=False)  # User must opt-in
+    sync_interval_minutes = Column(Integer, default=15)  # 15, 30, 60 mins
+    last_sync_at = Column(DateTime)  # Track when last synced
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

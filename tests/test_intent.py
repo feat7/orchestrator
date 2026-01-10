@@ -41,10 +41,12 @@ async def test_classify_returns_valid_steps(mock_llm):
     classifier = IntentClassifier(mock_llm)
     intent = await classifier.classify("Search my drive for budget documents")
 
-    # Steps are strings due to use_enum_values=True in ParsedIntent
+    # Steps are now ExecutionStep objects
     valid_steps = [s.value for s in StepType]
-    for step in intent.steps:
-        assert step in valid_steps
+    for exec_step in intent.steps:
+        # ExecutionStep has a 'step' attribute which is the StepType value
+        step_value = exec_step.step if isinstance(exec_step.step, str) else exec_step.step.value
+        assert step_value in valid_steps
 
 
 @pytest.mark.asyncio
@@ -84,10 +86,10 @@ def test_build_intent_with_invalid_services():
     data = {
         "services": ["gmail", "invalid_service", "gcal"],
         "operation": "search",
-        "steps": ["search_gmail"],
+        "steps": [{"step": "search_gmail", "params": {"search_query": "test"}}],
     }
 
-    intent = classifier._build_intent(data)
+    intent = classifier._build_intent(data, "test query")
 
     # Services are strings due to use_enum_values=True in ParsedIntent
     # Should have gmail and gcal, but not invalid_service
@@ -104,7 +106,7 @@ def test_build_intent_defaults():
     classifier = IntentClassifier(None)
 
     # Empty data should return defaults
-    intent = classifier._build_intent({})
+    intent = classifier._build_intent({}, "test query")
 
     assert len(intent.services) > 0  # Should have default service
     assert len(intent.steps) > 0  # Should have default step

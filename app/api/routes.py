@@ -2,8 +2,11 @@
 
 import json
 import asyncio
+import logging
 from uuid import UUID, uuid4
 from typing import Optional, AsyncGenerator
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -19,6 +22,8 @@ from app.schemas.query import (
     SyncTriggerRequest,
     SyncStatusResponse,
     HealthResponse,
+    UserSettingsResponse,
+    UserSettingsUpdateRequest,
 )
 from app.schemas.intent import ParsedIntent, StepResult
 from app.api.dependencies import (
@@ -258,7 +263,6 @@ async def _stream_query_response(
     query: str,
     conversation_id: UUID,
     user_id: str,
-    db: AsyncSession,
     embedding_service,
     synthesizer: ResponseSynthesizer,
     cache: CacheService,
@@ -272,216 +276,226 @@ async def _stream_query_response(
     - response_chunk: Parts of the response text
     - done: Final result with all data
     - error: If something goes wrong
+
+    Note: Creates its own DB session to avoid connection pool issues
+    with FastAPI's dependency injection during streaming.
     """
+    from app.db.database import async_session
+
     start_time = time.time()
 
     def sse_event(event_type: str, data: dict) -> str:
         """Format data as SSE event."""
         return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
-    try:
-        # Step 1: Get orchestrator (no status message - happens quickly)
+    # Create our own DB session for the duration of streaming
+    async with async_session() as db:
+        try:
+            # Step 1: Get orchestrator (no status message - happens quickly)
 
-        from app.core.orchestrator import Orchestrator
-        from app.core.intent import IntentClassifier
-        from app.core.planner import QueryPlanner
-        from app.core.llm import get_llm
-        from app.agents.gmail import GmailAgent
-        from app.agents.gcal import GcalAgent
-        from app.agents.gdrive import GdriveAgent
-        from app.schemas.intent import ServiceType, StepResult
+            from app.core.orchestrator import Orchestrator
+            from app.core.intent import IntentClassifier
+            from app.core.planner import QueryPlanner
+            from app.core.llm import get_llm
+            from app.agents.gmail import GmailAgent
+            from app.agents.gcal import GcalAgent
+            from app.agents.gdrive import GdriveAgent
+            from app.schemas.intent import ServiceType, StepResult
 
-        # Get user credentials
-        credentials = await get_user_credentials(user_id, db)
+            # Get user credentials
+            credentials = await get_user_credentials(user_id, db)
 
-        # Initialize services
-        gmail_service = GmailService(db, credentials)
-        calendar_service = CalendarService(db, credentials)
-        drive_service = DriveService(db, credentials)
+            # Initialize services
+            gmail_service = GmailService(db, credentials)
+            calendar_service = CalendarService(db, credentials)
+            drive_service = DriveService(db, credentials)
 
-        # IntentClassifier needs LLM, not embedding service
-        llm = get_llm()
+            # IntentClassifier needs LLM, not embedding service
+            llm = get_llm()
 
-        # Create agents (GmailAgent needs LLM for email composition)
-        agents = {
-            ServiceType.GMAIL: GmailAgent(gmail_service, embedding_service, llm),
-            ServiceType.GCAL: GcalAgent(calendar_service, embedding_service),
-            ServiceType.GDRIVE: GdriveAgent(drive_service, embedding_service),
-        }
-        classifier = IntentClassifier(llm)
-        planner = QueryPlanner()
-        orchestrator = Orchestrator(classifier, planner, agents)
+            # Create agents (GmailAgent needs LLM for email composition)
+            agents = {
+                ServiceType.GMAIL: GmailAgent(gmail_service, embedding_service, llm),
+                ServiceType.GCAL: GcalAgent(calendar_service, embedding_service),
+                ServiceType.GDRIVE: GdriveAgent(drive_service, embedding_service),
+            }
+            classifier = IntentClassifier(llm)
+            planner = QueryPlanner()
+            orchestrator = Orchestrator(classifier, planner, agents)
 
-        # Step 2: Classify intent
-        yield sse_event("status", {"message": "Understanding your request...", "step": 1, "total_steps": 4})
-        await asyncio.sleep(0.05)  # Small delay for UI feedback
+            # Step 2: Classify intent
+            yield sse_event("status", {"message": "Understanding your request...", "step": 1, "total_steps": 4})
+            await asyncio.sleep(0.05)  # Small delay for UI feedback
 
-        intent = await orchestrator.classifier.classify(query, conversation_context)
+            logger.info(f"Starting intent classification for query: '{query[:80]}...'")
+            classify_start = time.time()
+            intent = await orchestrator.classifier.classify(query, conversation_context)
+            classify_time = (time.time() - classify_start) * 1000
+            logger.info(f"Intent classification completed in {classify_time:.0f}ms: {intent.operation} - {intent.steps}")
 
-        # Check confidence and potentially need clarification
-        if intent.confidence < CLARIFICATION_CONFIDENCE_THRESHOLD:
-            options = _generate_clarification_options(query, intent)
-            if options:
-                latency_ms = int((time.time() - start_time) * 1000)
-                yield sse_event("done", {
-                    "response": f"I'm not quite sure what you mean. Could you clarify?\n\nYour query: \"{query}\"\n\nDid you mean one of these?",
-                    "actions_taken": [],
-                    "conversation_id": str(conversation_id),
-                    "intent": intent.model_dump(),
-                    "needs_clarification": True,
-                    "options": options,
-                    "latency_ms": latency_ms,
+            # Check confidence and potentially need clarification
+            if intent.confidence < CLARIFICATION_CONFIDENCE_THRESHOLD:
+                options = _generate_clarification_options(query, intent)
+                if options:
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    yield sse_event("done", {
+                        "response": f"I'm not quite sure what you mean. Could you clarify?\n\nYour query: \"{query}\"\n\nDid you mean one of these?",
+                        "actions_taken": [],
+                        "conversation_id": str(conversation_id),
+                        "intent": intent.model_dump(),
+                        "needs_clarification": True,
+                        "options": options,
+                        "latency_ms": latency_ms,
+                    })
+                    return
+
+            # Step 3: Create plan and show what we'll do
+            yield sse_event("status", {"message": "Planning actions...", "step": 2, "total_steps": 4})
+
+            plan = orchestrator.planner.create_plan(intent)
+
+            service_names = {
+                "gmail": "Gmail",
+                "gcal": "Calendar",
+                "gdrive": "Drive"
+            }
+
+            # Step 4: Execute plan with progress updates
+            all_results = []
+            step_results = {}
+            total_groups = len(plan.parallel_groups)
+
+            for group_idx, parallel_group in enumerate(plan.parallel_groups):
+                steps = [s for s in plan.steps if s.step_id in parallel_group]
+
+                # Show what steps we're executing
+                step_names = []
+                for step in steps:
+                    step_value = step.step.value if hasattr(step.step, 'value') else step.step
+                    if step_value.startswith("search_"):
+                        service = step.service.value if hasattr(step.service, 'value') else step.service
+                        step_names.append(f"Searching {service_names.get(service, service)}")
+                    else:
+                        step_names.append(step_value.replace("_", " ").title())
+
+                yield sse_event("status", {
+                    "message": " & ".join(step_names) + "...",
+                    "step": 3,
+                    "total_steps": 4,
+                    "progress": f"{group_idx + 1}/{total_groups}"
                 })
-                return
 
-        # Step 3: Create plan and show what we'll do
-        yield sse_event("status", {"message": "Planning actions...", "step": 2, "total_steps": 4})
+                # Execute steps in parallel
+                tasks = []
+                for step in steps:
+                    params = orchestrator._enrich_params(step, step_results, intent, query)
+                    task = orchestrator._execute_step(step, params, user_id)
+                    tasks.append((step.step_id, step.step, task))
 
-        plan = orchestrator.planner.create_plan(intent)
+                results = await asyncio.gather(*[t[2] for t in tasks], return_exceptions=True)
 
-        service_names = {
-            "gmail": "Gmail",
-            "gcal": "Calendar",
-            "gdrive": "Drive"
-        }
+                # Process results
+                for (step_id, step_type, _), result in zip(tasks, results):
+                    if isinstance(result, Exception):
+                        result = StepResult(step=step_type, success=False, error=str(result))
+                    step_results[step_id] = result
+                    all_results.append(result)
 
-        # Step 4: Execute plan with progress updates
-        all_results = []
-        step_results = {}
-        total_groups = len(plan.parallel_groups)
+                    # Notify step completion
+                    step_value = step_type.value if hasattr(step_type, 'value') else step_type
+                    yield sse_event("step_complete", {
+                        "step": step_value,
+                        "success": result.success,
+                        "has_results": bool(result.data and result.data.get("results"))
+                    })
 
-        for group_idx, parallel_group in enumerate(plan.parallel_groups):
-            steps = [s for s in plan.steps if s.step_id in parallel_group]
+            # Step 5: Synthesize response
+            yield sse_event("status", {"message": "Composing response...", "step": 4, "total_steps": 4})
 
-            # Show what steps we're executing
-            step_names = []
-            for step in steps:
-                step_value = step.step.value if hasattr(step.step, 'value') else step.step
-                if step_value.startswith("search_"):
-                    service = step.service.value if hasattr(step.service, 'value') else step.service
-                    step_names.append(f"Searching {service_names.get(service, service)}")
-                else:
-                    step_names.append(step_value.replace("_", " ").title())
+            step_results_list = [
+                r if isinstance(r, StepResult) else StepResult(**r.model_dump() if hasattr(r, 'model_dump') else r)
+                for r in all_results
+            ]
 
-            yield sse_event("status", {
-                "message": " & ".join(step_names) + "...",
-                "step": 3,
-                "total_steps": 4,
-                "progress": f"{group_idx + 1}/{total_groups}"
+            response_text = await synthesizer.synthesize(
+                query=query,
+                intent=intent,
+                results=step_results_list,
+                conversation_context=conversation_context,
+            )
+
+            # Stream the response text in chunks while preserving newlines
+            # Split by lines first, then stream each line with its words
+            lines = response_text.split('\n')
+            streamed_text = ""
+            chunk_size = 5  # Words per chunk
+
+            for line_idx, line in enumerate(lines):
+                if line.strip():
+                    # Stream non-empty lines word by word
+                    words = line.split(' ')
+                    for i in range(0, len(words), chunk_size):
+                        chunk = ' '.join(words[i:i + chunk_size])
+                        if i + chunk_size < len(words):
+                            chunk += ' '
+                        streamed_text += chunk
+                        yield sse_event("response_chunk", {"text": chunk, "partial": streamed_text})
+                        await asyncio.sleep(0.02)
+                # Add newline after each line (except the last one)
+                if line_idx < len(lines) - 1:
+                    streamed_text += '\n'
+                    yield sse_event("response_chunk", {"text": "\n", "partial": streamed_text})
+                    await asyncio.sleep(0.01)
+
+            # Convert results to ActionTaken format
+            actions_taken = [
+                {
+                    "step": r.step.value if hasattr(r.step, 'value') else r.step,
+                    "success": r.success,
+                    "data": r.data,
+                    "error": r.error,
+                }
+                for r in step_results_list
+            ]
+
+            # Save to conversation context (both query and response for context)
+            await cache.add_to_conversation(
+                str(conversation_id),
+                {"query": query, "response": response_text, "intent": intent.model_dump()},
+            )
+
+            latency_ms = int((time.time() - start_time) * 1000)
+            _metrics["latencies"].append(latency_ms)
+
+            # Keep only last 1000 latency measurements
+            if len(_metrics["latencies"]) > 1000:
+                _metrics["latencies"] = _metrics["latencies"][-1000:]
+
+            # Send final done event
+            yield sse_event("done", {
+                "response": response_text,
+                "actions_taken": actions_taken,
+                "conversation_id": str(conversation_id),
+                "intent": intent.model_dump(),
+                "needs_clarification": False,
+                "options": None,
+                "latency_ms": latency_ms,
             })
 
-            # Execute steps in parallel
-            tasks = []
-            for step in steps:
-                params = orchestrator._enrich_params(step, step_results, intent, query)
-                task = orchestrator._execute_step(step, params, user_id)
-                tasks.append((step.step_id, step.step, task))
+        except Exception as e:
+            latency_ms = int((time.time() - start_time) * 1000)
+            _metrics["latencies"].append(latency_ms)
 
-            results = await asyncio.gather(*[t[2] for t in tasks], return_exceptions=True)
-
-            # Process results
-            for (step_id, step_type, _), result in zip(tasks, results):
-                if isinstance(result, Exception):
-                    result = StepResult(step=step_type, success=False, error=str(result))
-                step_results[step_id] = result
-                all_results.append(result)
-
-                # Notify step completion
-                step_value = step_type.value if hasattr(step_type, 'value') else step_type
-                yield sse_event("step_complete", {
-                    "step": step_value,
-                    "success": result.success,
-                    "has_results": bool(result.data and result.data.get("results"))
-                })
-
-        # Step 5: Synthesize response
-        yield sse_event("status", {"message": "Composing response...", "step": 4, "total_steps": 4})
-
-        step_results_list = [
-            r if isinstance(r, StepResult) else StepResult(**r.model_dump() if hasattr(r, 'model_dump') else r)
-            for r in all_results
-        ]
-
-        response_text = await synthesizer.synthesize(
-            query=query,
-            intent=intent,
-            results=step_results_list,
-            conversation_context=conversation_context,
-        )
-
-        # Stream the response text in chunks while preserving newlines
-        # Split by lines first, then stream each line with its words
-        lines = response_text.split('\n')
-        streamed_text = ""
-        chunk_size = 5  # Words per chunk
-
-        for line_idx, line in enumerate(lines):
-            if line.strip():
-                # Stream non-empty lines word by word
-                words = line.split(' ')
-                for i in range(0, len(words), chunk_size):
-                    chunk = ' '.join(words[i:i + chunk_size])
-                    if i + chunk_size < len(words):
-                        chunk += ' '
-                    streamed_text += chunk
-                    yield sse_event("response_chunk", {"text": chunk, "partial": streamed_text})
-                    await asyncio.sleep(0.02)
-            # Add newline after each line (except the last one)
-            if line_idx < len(lines) - 1:
-                streamed_text += '\n'
-                yield sse_event("response_chunk", {"text": "\n", "partial": streamed_text})
-                await asyncio.sleep(0.01)
-
-        # Convert results to ActionTaken format
-        actions_taken = [
-            {
-                "step": r.step.value if hasattr(r.step, 'value') else r.step,
-                "success": r.success,
-                "data": r.data,
-                "error": r.error,
-            }
-            for r in step_results_list
-        ]
-
-        # Save to conversation context (both query and response for context)
-        await cache.add_to_conversation(
-            str(conversation_id),
-            {"query": query, "response": response_text, "intent": intent.model_dump()},
-        )
-
-        latency_ms = int((time.time() - start_time) * 1000)
-        _metrics["latencies"].append(latency_ms)
-
-        # Keep only last 1000 latency measurements
-        if len(_metrics["latencies"]) > 1000:
-            _metrics["latencies"] = _metrics["latencies"][-1000:]
-
-        # Send final done event
-        yield sse_event("done", {
-            "response": response_text,
-            "actions_taken": actions_taken,
-            "conversation_id": str(conversation_id),
-            "intent": intent.model_dump(),
-            "needs_clarification": False,
-            "options": None,
-            "latency_ms": latency_ms,
-        })
-
-    except Exception as e:
-        latency_ms = int((time.time() - start_time) * 1000)
-        _metrics["latencies"].append(latency_ms)
-
-        yield sse_event("error", {
-            "message": str(e),
-            "latency_ms": latency_ms,
-        })
+            yield sse_event("error", {
+                "message": str(e),
+                "latency_ms": latency_ms,
+            })
 
 
 @router.post("/query/stream")
 async def process_query_stream(
     request: QueryRequest,
     current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
     embedding_service=Depends(get_embedding_service),
     synthesizer: ResponseSynthesizer = Depends(get_synthesizer),
     cache: CacheService = Depends(get_cache_service),
@@ -507,15 +521,18 @@ async def process_query_stream(
         )
         if conversation_context:
             _metrics["cache_hits"] += 1
+            logger.info(f"Loaded {len(conversation_context)} context messages for conversation {request.conversation_id}")
         else:
             _metrics["cache_misses"] += 1
+            logger.debug(f"No conversation context found for {request.conversation_id}")
+
+    logger.info(f"Processing streaming query: '{request.query[:100]}...' with {len(conversation_context)} context messages")
 
     return StreamingResponse(
         _stream_query_response(
             query=request.query,
             conversation_id=conversation_id,
             user_id=current_user.user_id,
-            db=db,
             embedding_service=embedding_service,
             synthesizer=synthesizer,
             cache=cache,
@@ -691,10 +708,11 @@ async def get_conversation_messages(
 
 
 @router.get("/auth/login")
-async def google_login(db: AsyncSession = Depends(get_db)):
+async def google_login(request: Request, db: AsyncSession = Depends(get_db)):
     """Initiate Google OAuth login flow.
 
     Redirects user to Google's consent screen.
+    Stores OAuth state in session for CSRF protection.
 
     Returns:
         Redirect to Google OAuth consent page
@@ -708,36 +726,112 @@ async def google_login(db: AsyncSession = Depends(get_db)):
     auth_service = GoogleAuthService(db)
     authorization_url, state = auth_service.get_authorization_url()
 
+    # Store state in session for CSRF verification in callback
+    request.session["oauth_state"] = state
+
     return RedirectResponse(url=authorization_url)
 
 
 @router.get("/auth/callback")
 async def google_callback(
     request: Request,
-    code: str,
+    code: Optional[str] = None,
     state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Handle Google OAuth callback.
+    """Handle Google OAuth callback with comprehensive error handling.
 
     Exchanges authorization code for tokens and creates/updates user.
     Sets session cookie for subsequent authenticated requests.
 
+    Handles various OAuth error scenarios:
+    - User denies access (error=access_denied)
+    - Authorization code expired (invalid_grant)
+    - Missing or invalid scopes
+    - CSRF state mismatch
+
     Args:
         request: FastAPI request object (for session access)
-        code: Authorization code from Google
+        code: Authorization code from Google (None if error occurred)
         state: State parameter for CSRF protection
+        error: OAuth error code (e.g., "access_denied")
+        error_description: Human-readable error description
         db: Database session
 
     Returns:
-        Redirect to home page with session set
+        Redirect to home page with session set, or error page
     """
+    import logging
+    import urllib.parse
+
+    logger = logging.getLogger(__name__)
+
     if settings.use_mock_google:
         raise HTTPException(
             status_code=400,
             detail="Google OAuth is disabled in mock mode",
         )
 
+    # =========================================================================
+    # Case 1: User denied access (clicked "Deny" on consent screen)
+    # =========================================================================
+    if error == "access_denied":
+        logger.warning("User denied OAuth access")
+        error_msg = urllib.parse.quote(
+            "You need to grant access to use this app. Please try again and click 'Allow' on the Google consent screen."
+        )
+        return RedirectResponse(
+            url=f"/?auth=denied&message={error_msg}",
+            status_code=302
+        )
+
+    # =========================================================================
+    # Case 2: Other OAuth errors from Google
+    # =========================================================================
+    if error:
+        logger.error(f"OAuth error from Google: {error} - {error_description}")
+        error_msg = urllib.parse.quote(
+            error_description or f"Authentication error: {error}"
+        )
+        return RedirectResponse(
+            url=f"/?auth=error&message={error_msg}",
+            status_code=302
+        )
+
+    # =========================================================================
+    # Case 3: No authorization code received (shouldn't happen normally)
+    # =========================================================================
+    if not code:
+        logger.error("OAuth callback received without code or error")
+        error_msg = urllib.parse.quote(
+            "No authorization code received. Please try again."
+        )
+        return RedirectResponse(
+            url=f"/?auth=error&message={error_msg}",
+            status_code=302
+        )
+
+    # =========================================================================
+    # Case 4: State mismatch (CSRF protection)
+    # =========================================================================
+    # Note: For full CSRF protection, you would store state in session during
+    # login and verify it here. This is a placeholder for that check.
+    expected_state = request.session.get("oauth_state")
+    if expected_state and state != expected_state:
+        logger.warning(f"OAuth state mismatch: expected {expected_state}, got {state}")
+        error_msg = urllib.parse.quote(
+            "Security validation failed. Please try logging in again."
+        )
+        return RedirectResponse(
+            url=f"/?auth=error&message={error_msg}",
+            status_code=302
+        )
+
+    # =========================================================================
+    # Case 5: Exchange code for tokens
+    # =========================================================================
     try:
         auth_service = GoogleAuthService(db)
         result = await auth_service.handle_callback(code, state)
@@ -746,12 +840,53 @@ async def google_callback(
         request.session["user_id"] = result["user_id"]
         request.session["email"] = result["email"]
 
-        # Redirect to home page instead of returning JSON
+        # Clear OAuth state from session
+        if "oauth_state" in request.session:
+            del request.session["oauth_state"]
+
+        logger.info(f"OAuth success for user {result['email']}")
+
+        # Redirect to home page
         return RedirectResponse(url="/?auth=success", status_code=302)
+
     except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"OAuth callback failed: {str(e)}",
+        error_str = str(e).lower()
+        logger.exception(f"OAuth callback failed: {e}")
+
+        # =====================================================================
+        # Case 5a: Authorization code expired or already used
+        # =====================================================================
+        if "invalid_grant" in error_str:
+            error_msg = urllib.parse.quote(
+                "Login session expired. Please try again."
+            )
+            return RedirectResponse(
+                url=f"/?auth=error&message={error_msg}",
+                status_code=302
+            )
+
+        # =====================================================================
+        # Case 5b: Invalid client configuration
+        # =====================================================================
+        if "invalid_client" in error_str:
+            logger.critical("OAuth client configuration error - check GOOGLE_CLIENT_ID/SECRET")
+            error_msg = urllib.parse.quote(
+                "There's a configuration issue. Please contact support."
+            )
+            return RedirectResponse(
+                url=f"/?auth=error&message={error_msg}",
+                status_code=302
+            )
+
+        # =====================================================================
+        # Case 5c: Generic error
+        # =====================================================================
+        error_msg = urllib.parse.quote(
+            "Login failed. Please try again."
+        )
+        return RedirectResponse(
+            url=f"/?auth=error&message={error_msg}",
+            status_code=302
         )
 
 
@@ -846,6 +981,91 @@ async def auth_status(
             "authenticated": False,
             "message": "Token expired or invalid. Visit /api/v1/auth/login to re-authenticate.",
         }
+
+
+# =============================================================================
+# User Settings Routes
+# =============================================================================
+
+
+@router.get("/users/me/settings", response_model=UserSettingsResponse)
+async def get_user_settings(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the current user's settings.
+
+    Returns autosync preferences including:
+    - autosync_enabled: Whether automatic sync is on
+    - sync_interval_minutes: How often to sync (15, 30, or 60)
+    - last_sync_at: When the last sync occurred
+
+    Requires authentication via session cookie.
+    """
+    result = await db.execute(
+        select(User).where(User.id == UUID(current_user.user_id))
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return UserSettingsResponse(
+        autosync_enabled=user.autosync_enabled or False,
+        sync_interval_minutes=user.sync_interval_minutes or 15,
+        last_sync_at=user.last_sync_at,
+    )
+
+
+@router.patch("/users/me/settings", response_model=UserSettingsResponse)
+async def update_user_settings(
+    request: UserSettingsUpdateRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the current user's settings.
+
+    Accepts partial updates - only provided fields will be changed.
+
+    Args:
+        request: Settings to update (autosync_enabled, sync_interval_minutes)
+
+    Returns:
+        Updated user settings
+
+    Raises:
+        400: If sync_interval_minutes is not 15, 30, or 60
+    """
+    # Validate sync interval
+    if request.sync_interval_minutes is not None:
+        if request.sync_interval_minutes not in [15, 30, 60]:
+            raise HTTPException(
+                status_code=400,
+                detail="sync_interval_minutes must be 15, 30, or 60"
+            )
+
+    result = await db.execute(
+        select(User).where(User.id == UUID(current_user.user_id))
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Update only provided fields
+    if request.autosync_enabled is not None:
+        user.autosync_enabled = request.autosync_enabled
+    if request.sync_interval_minutes is not None:
+        user.sync_interval_minutes = request.sync_interval_minutes
+
+    await db.commit()
+    await db.refresh(user)
+
+    return UserSettingsResponse(
+        autosync_enabled=user.autosync_enabled or False,
+        sync_interval_minutes=user.sync_interval_minutes or 15,
+        last_sync_at=user.last_sync_at,
+    )
 
 
 # =============================================================================

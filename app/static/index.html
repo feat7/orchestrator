@@ -156,6 +156,70 @@
             color: var(--text-primary);
         }
 
+        /* Settings */
+        .settings-section {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 0;
+        }
+
+        .settings-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .toggle {
+            position: relative;
+            width: 36px;
+            height: 20px;
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .toggle.active {
+            background: var(--accent);
+        }
+
+        .toggle::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.2s;
+        }
+
+        .toggle.active::after {
+            transform: translateX(16px);
+        }
+
+        .interval-select {
+            padding: 4px 8px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .interval-select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
         /* Main */
         .main {
             flex: 1;
@@ -413,6 +477,15 @@
         .message-body strong {
             font-weight: 600;
             color: var(--text-primary);
+        }
+
+        .message-body a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .message-body a:hover {
+            text-decoration: underline;
         }
 
         .message-body h1, .message-body h2, .message-body h3 {
@@ -793,6 +866,21 @@
                     </div>
                 </div>
                 <button class="sync-btn" onclick="triggerSync('all')">Sync all</button>
+
+                <div class="settings-section">
+                    <div class="settings-row">
+                        <span class="settings-label">Auto-sync</span>
+                        <div class="toggle" id="autosync-toggle" onclick="toggleAutosync()"></div>
+                    </div>
+                    <div class="settings-row" id="interval-row" style="display: none;">
+                        <span class="settings-label">Interval</span>
+                        <select class="interval-select" id="interval-select" onchange="updateInterval()">
+                            <option value="15">15 min</option>
+                            <option value="30">30 min</option>
+                            <option value="60">60 min</option>
+                        </select>
+                    </div>
+                </div>
             </div>
         </aside>
 
@@ -899,9 +987,20 @@
         let email = '';
 
         // Configure marked to convert single newlines to <br>
+        // and make links open in new tab
+        const renderer = new marked.Renderer();
+        renderer.link = function(href, title, text) {
+            // Handle both old and new marked API
+            const url = typeof href === 'object' ? href.href : href;
+            const linkTitle = typeof href === 'object' ? href.title : title;
+            const linkText = typeof href === 'object' ? href.text : text;
+            const titleAttr = linkTitle ? ` title="${linkTitle}"` : '';
+            return `<a href="${url}" target="_blank" rel="noopener noreferrer"${titleAttr}>${linkText}</a>`;
+        };
         marked.setOptions({
             breaks: true,
-            gfm: true
+            gfm: true,
+            renderer: renderer
         });
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -947,6 +1046,7 @@
             document.getElementById('input-area').style.display = 'block';
             document.getElementById('auth').style.display = 'none';
             refreshSync();
+            loadSettings();
         }
 
         function showUnauth() {
@@ -1238,6 +1338,67 @@
             if (mins < 60) return mins + 'm';
             if (mins < 1440) return Math.floor(mins / 60) + 'h';
             return Math.floor(mins / 1440) + 'd';
+        }
+
+        // Settings management
+        let userSettings = { autosync_enabled: false, sync_interval_minutes: 15 };
+
+        async function loadSettings() {
+            try {
+                const r = await fetch(`${API}/users/me/settings`, { credentials: 'include' });
+                if (r.ok) {
+                    userSettings = await r.json();
+                    updateSettingsUI();
+                }
+            } catch {}
+        }
+
+        function updateSettingsUI() {
+            const toggle = document.getElementById('autosync-toggle');
+            const intervalRow = document.getElementById('interval-row');
+            const intervalSelect = document.getElementById('interval-select');
+
+            if (userSettings.autosync_enabled) {
+                toggle.classList.add('active');
+                intervalRow.style.display = 'flex';
+            } else {
+                toggle.classList.remove('active');
+                intervalRow.style.display = 'none';
+            }
+
+            intervalSelect.value = userSettings.sync_interval_minutes || 15;
+        }
+
+        async function toggleAutosync() {
+            const newValue = !userSettings.autosync_enabled;
+            try {
+                const r = await fetch(`${API}/users/me/settings`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ autosync_enabled: newValue })
+                });
+                if (r.ok) {
+                    userSettings = await r.json();
+                    updateSettingsUI();
+                }
+            } catch {}
+        }
+
+        async function updateInterval() {
+            const intervalSelect = document.getElementById('interval-select');
+            const newValue = parseInt(intervalSelect.value);
+            try {
+                const r = await fetch(`${API}/users/me/settings`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ sync_interval_minutes: newValue })
+                });
+                if (r.ok) {
+                    userSettings = await r.json();
+                }
+            } catch {}
         }
     </script>
 </body>

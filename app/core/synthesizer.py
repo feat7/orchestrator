@@ -22,6 +22,8 @@ FORMATTING GUIDELINES:
 - Format dates in human-readable way (e.g., "Monday, January 15 at 2:00 PM")
 - Keep responses concise but complete
 - If multiple items found, summarize the most relevant ones
+- ALWAYS include clickable links for files when available. Format as markdown: [filename](url)
+- For Google Drive files, show the link so users can open the file directly in their browser
 
 IMPORTANT - EMAIL DRAFTS:
 When a draft email is created, ALWAYS:
@@ -64,6 +66,25 @@ For a calendar search:
 - Thursday 10 AM: 1:1 with Sarah
 
 Would you like more details about any of these events?"
+
+For a file search:
+"I found these documents matching your search:
+- [Q4 Budget Report](https://docs.google.com/...) - Google Sheets, modified Jan 5
+- [Project Proposal](https://docs.google.com/...) - Google Docs, modified Dec 20
+
+Click a link to open the file directly in Google Drive."
+
+For opening/showing a file:
+"Here's the document you asked about:
+
+**[Meeting Notes - Dec 15](https://docs.google.com/...)**
+
+The meeting covered three main topics:
+1. Q1 planning timeline
+2. Budget allocation
+3. Team assignments
+
+Click the link above to open the full document in Google Drive."
 
 For a failure:
 "I couldn't find any emails matching your search. Try:
@@ -113,6 +134,10 @@ class ResponseSynthesizer:
         Returns:
             A natural language response string
         """
+        # Handle chat operations (conversational responses, no action needed)
+        if intent.operation == "chat":
+            return intent.response or "Is there anything else you'd like to know?"
+
         # Check if this is a sent email result - show success message
         sent_result = self._extract_sent_result(results)
         if sent_result:
@@ -280,6 +305,28 @@ The email is now in your Sent folder."""
                         for item in items:
                             lines.append(self._format_item(item))
 
+                # Format file content results (from get_file)
+                elif "content_preview" in r.data:
+                    name = r.data.get("name", "Untitled")
+                    mime_type = r.data.get("mime_type", "")
+                    content = r.data.get("content_preview", "")
+                    modified = r.data.get("modified_at", "")
+                    web_link = r.data.get("web_link", "")
+                    lines.append(f"  FILE: {name}")
+                    lines.append(f"  Type: {mime_type}")
+                    if web_link:
+                        lines.append(f"  Link: {web_link}")
+                    if modified:
+                        lines.append(f"  Last modified: {modified}")
+                    lines.append(f"  CONTENT:")
+                    if content:
+                        # Show the actual file content
+                        lines.append(f"  ---")
+                        lines.append(f"  {content}")
+                        lines.append(f"  ---")
+                    else:
+                        lines.append(f"  (No content available)")
+
                 # Format draft email results - include full content for display
                 elif "draft_id" in r.data:
                     lines.append(f"  Draft saved to Gmail Drafts folder (ID: {r.data['draft_id']})")
@@ -346,7 +393,11 @@ The email is now in your Sent folder."""
         if "name" in item:
             name = item.get("name", "Unnamed")
             mime = item.get("mime_type", "")
-            return f"    - File: \"{name}\" ({mime})"
+            modified = item.get("modified_at", "")
+            web_link = item.get("web_link", "")
+            date_str = f", modified {modified}" if modified else ""
+            link_str = f" - {web_link}" if web_link else ""
+            return f"    - File: \"{name}\" ({mime}{date_str}){link_str}"
 
         # Generic format
         return f"    - {item}"

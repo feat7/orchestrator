@@ -2,7 +2,7 @@
 
 import pytest
 from app.core.planner import QueryPlanner, ExecutionStep, ExecutionPlan
-from app.schemas.intent import ParsedIntent, ServiceType, StepType
+from app.schemas.intent import ParsedIntent, ServiceType, StepType, ExecutionStep as IntentExecutionStep
 
 
 def test_planner_initialization():
@@ -40,7 +40,11 @@ def test_parallel_groups_search_steps():
         services=[ServiceType.GMAIL, ServiceType.GCAL, ServiceType.GDRIVE],
         operation="search",
         entities={},
-        steps=[StepType.SEARCH_GMAIL, StepType.SEARCH_CALENDAR, StepType.SEARCH_DRIVE],
+        steps=[
+            IntentExecutionStep(step=StepType.SEARCH_GMAIL, params={"search_query": "test"}),
+            IntentExecutionStep(step=StepType.SEARCH_CALENDAR, params={"search_query": "test"}),
+            IntentExecutionStep(step=StepType.SEARCH_DRIVE, params={"search_query": "test"}),
+        ],
     )
 
     plan = planner.create_plan(intent)
@@ -58,7 +62,10 @@ def test_dependencies_action_after_search():
         services=[ServiceType.GMAIL],
         operation="update",
         entities={},
-        steps=[StepType.SEARCH_GMAIL, StepType.DRAFT_EMAIL],
+        steps=[
+            IntentExecutionStep(step=StepType.SEARCH_GMAIL, params={"search_query": "test"}),
+            IntentExecutionStep(step=StepType.DRAFT_EMAIL, params={"message": "test"}, depends_on=[0]),
+        ],
     )
 
     plan = planner.create_plan(intent)
@@ -77,7 +84,11 @@ def test_parallel_groups_with_dependencies():
         services=[ServiceType.GMAIL, ServiceType.GCAL],
         operation="update",
         entities={},
-        steps=[StepType.SEARCH_GMAIL, StepType.SEARCH_CALENDAR, StepType.DRAFT_EMAIL],
+        steps=[
+            IntentExecutionStep(step=StepType.SEARCH_GMAIL, params={"search_query": "test"}),
+            IntentExecutionStep(step=StepType.SEARCH_CALENDAR, params={"search_query": "test"}),
+            IntentExecutionStep(step=StepType.DRAFT_EMAIL, params={"message": "test"}, depends_on=[0, 1]),
+        ],
     )
 
     plan = planner.create_plan(intent)
