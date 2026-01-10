@@ -108,6 +108,72 @@
             padding: 8px 8px 12px;
         }
 
+        .conv-item {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 4px;
+            transition: background 0.15s;
+        }
+
+        .conv-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .conv-item.active {
+            background: var(--bg-tertiary);
+        }
+
+        .conv-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .conv-title {
+            font-size: 13px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .conv-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .conv-delete {
+            display: none;
+            padding: 4px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 4px;
+            flex-shrink: 0;
+            margin-left: 4px;
+        }
+
+        .conv-delete:hover {
+            background: var(--bg-tertiary);
+            color: #ef4444;
+        }
+
+        .conv-item:hover .conv-delete {
+            display: flex;
+        }
+
+        .no-conversations {
+            font-size: 12px;
+            color: var(--text-muted);
+            padding: 8px 12px;
+            text-align: center;
+        }
+
         .sidebar-footer {
             padding: 12px;
             border-top: 1px solid var(--border);
@@ -848,6 +914,7 @@
 
             <div class="sidebar-content">
                 <div class="section-label">Recent</div>
+                <div id="conversation-list"></div>
             </div>
 
             <div class="sidebar-footer" id="sidebar-footer" style="display: none;">
@@ -1047,6 +1114,7 @@
             document.getElementById('auth').style.display = 'none';
             refreshSync();
             loadSettings();
+            loadConversations();
         }
 
         function showUnauth() {
@@ -1069,7 +1137,126 @@
             document.getElementById('messages').innerHTML = '';
             document.getElementById('messages').style.display = 'none';
             document.getElementById('welcome').style.display = 'flex';
+            // Deselect active conversation in sidebar
+            document.querySelectorAll('.conv-item.active').forEach(el => el.classList.remove('active'));
             toggleSidebar();
+        }
+
+        async function loadConversations() {
+            try {
+                const r = await fetch(`${API}/conversations`, { credentials: 'include' });
+                if (!r.ok) return;
+                const convs = await r.json();
+                renderConversations(convs);
+            } catch (e) {
+                console.error('Failed to load conversations:', e);
+            }
+        }
+
+        function renderConversations(convs) {
+            const container = document.getElementById('conversation-list');
+            if (!convs.length) {
+                container.innerHTML = '<div class="no-conversations">No conversations yet</div>';
+                return;
+            }
+            container.innerHTML = convs.map(c => `
+                <div class="conv-item ${convId === c.id ? 'active' : ''}" data-conv-id="${c.id}">
+                    <div class="conv-content" onclick="loadConversation('${c.id}')">
+                        <div class="conv-title">${esc(c.title)}</div>
+                        <div class="conv-time">${formatConvTime(c.updated_at)}</div>
+                    </div>
+                    <button class="conv-delete" onclick="event.stopPropagation(); deleteConversation('${c.id}')" title="Delete">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        async function deleteConversation(id) {
+            if (!confirm('Delete this conversation?')) return;
+            try {
+                const r = await fetch(`${API}/conversations/${id}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+                if (r.ok) {
+                    // If we deleted the current conversation, start a new chat
+                    if (convId === id) {
+                        convId = null;
+                        document.getElementById('messages').innerHTML = '';
+                        document.getElementById('messages').style.display = 'none';
+                        document.getElementById('welcome').style.display = 'flex';
+                    }
+                    loadConversations();
+                }
+            } catch (e) {
+                console.error('Failed to delete conversation:', e);
+            }
+        }
+
+        function formatConvTime(d) {
+            if (!d) return '';
+            const date = new Date(d);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return diffMins + 'm ago';
+            if (diffMins < 1440) return Math.floor(diffMins / 60) + 'h ago';
+            if (diffMins < 10080) return Math.floor(diffMins / 1440) + 'd ago';
+            return date.toLocaleDateString();
+        }
+
+        async function loadConversation(id) {
+            try {
+                // Fetch messages for this conversation
+                const r = await fetch(`${API}/conversations/${id}/messages?limit=50`, { credentials: 'include' });
+                if (!r.ok) return;
+                const messages = await r.json();
+
+                // Set current conversation ID
+                convId = id;
+
+                // Update active state in sidebar
+                document.querySelectorAll('.conv-item').forEach(el => {
+                    el.classList.toggle('active', el.dataset.convId === id);
+                });
+
+                // Hide welcome, show messages
+                document.getElementById('welcome').style.display = 'none';
+                const msgContainer = document.getElementById('messages');
+                msgContainer.style.display = 'block';
+                msgContainer.innerHTML = '';
+
+                // Render messages (in chronological order - API returns desc)
+                messages.reverse().forEach(msg => {
+                    addMsg(msg.query, 'user');
+                    if (msg.response) {
+                        addAssistantMsg(msg.response);
+                    }
+                });
+
+                scrollBottom();
+                toggleSidebar();
+            } catch (e) {
+                console.error('Failed to load conversation:', e);
+            }
+        }
+
+        function addAssistantMsg(text) {
+            const m = document.getElementById('messages');
+            const d = document.createElement('div');
+            d.className = 'message';
+            d.innerHTML = `
+                <div class="message-header">
+                    <div class="message-avatar">AI</div>
+                    <span class="message-name">Assistant</span>
+                </div>
+                <div class="message-body">${marked.parse(text)}</div>
+            `;
+            m.appendChild(d);
         }
 
         function sendSuggestion(t) {
@@ -1150,6 +1337,8 @@
                         finalize(sid, final.actions_taken, final.latency_ms);
                     }
                     document.getElementById('latency').textContent = final.latency_ms + 'ms';
+                    // Refresh conversation list in sidebar
+                    loadConversations();
                 }
             } catch (err) {
                 removeEl(sid);

@@ -50,6 +50,7 @@ router = APIRouter()
 
 
 import time
+from datetime import datetime
 
 # Store metrics in memory (in production, use Redis/Prometheus)
 _metrics = {
@@ -267,6 +268,7 @@ async def _stream_query_response(
     synthesizer: ResponseSynthesizer,
     cache: CacheService,
     conversation_context: list,
+    is_new_conversation: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Stream query processing with status updates via SSE.
 
@@ -464,6 +466,38 @@ async def _stream_query_response(
                 {"query": query, "response": response_text, "intent": intent.model_dump()},
             )
 
+            # Persist to database
+            if is_new_conversation:
+                # Create conversation with title from first query (truncated)
+                title = query[:100] + "..." if len(query) > 100 else query
+                conversation = Conversation(
+                    id=conversation_id,
+                    user_id=UUID(user_id),
+                    title=title,
+                )
+                db.add(conversation)
+
+            # Save message to database
+            message = Message(
+                conversation_id=conversation_id,
+                query=query,
+                intent=intent.model_dump(),
+                response=response_text,
+                actions_taken=actions_taken,
+            )
+            db.add(message)
+
+            # Update conversation's updated_at timestamp
+            if not is_new_conversation:
+                from sqlalchemy import update
+                await db.execute(
+                    update(Conversation)
+                    .where(Conversation.id == conversation_id)
+                    .values(updated_at=datetime.utcnow())
+                )
+
+            await db.commit()
+
             latency_ms = int((time.time() - start_time) * 1000)
             _metrics["latencies"].append(latency_ms)
 
@@ -526,6 +560,9 @@ async def process_query_stream(
             _metrics["cache_misses"] += 1
             logger.debug(f"No conversation context found for {request.conversation_id}")
 
+    # Determine if this is a new conversation
+    is_new_conversation = request.conversation_id is None
+
     logger.info(f"Processing streaming query: '{request.query[:100]}...' with {len(conversation_context)} context messages")
 
     return StreamingResponse(
@@ -537,6 +574,7 @@ async def process_query_stream(
             synthesizer=synthesizer,
             cache=cache,
             conversation_context=conversation_context,
+            is_new_conversation=is_new_conversation,
         ),
         media_type="text/event-stream",
         headers={
@@ -666,10 +704,88 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.get("/conversations")
+async def list_conversations(
+    limit: int = 20,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List conversations for the current user.
+
+    Args:
+        limit: Max conversations to return (default 20)
+        current_user: The authenticated user
+        db: Database session
+
+    Returns:
+        List of conversations with id, title, and timestamps
+    """
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.user_id == UUID(current_user.user_id))
+        .order_by(Conversation.updated_at.desc())
+        .limit(limit)
+    )
+    conversations = result.scalars().all()
+
+    return [
+        {
+            "id": str(conv.id),
+            "title": conv.title or "Untitled",
+            "created_at": conv.created_at.isoformat() + "Z" if conv.created_at else None,
+            "updated_at": conv.updated_at.isoformat() + "Z" if conv.updated_at else None,
+        }
+        for conv in conversations
+    ]
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a conversation and all its messages.
+
+    Args:
+        conversation_id: The conversation UUID
+        current_user: The authenticated user
+        db: Database session
+
+    Returns:
+        Success status
+    """
+    from sqlalchemy import delete
+
+    # First verify the conversation belongs to the user
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conversation_id)
+        .where(Conversation.user_id == UUID(current_user.user_id))
+    )
+    if not conv_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Delete messages first (foreign key constraint)
+    await db.execute(
+        delete(Message).where(Message.conversation_id == conversation_id)
+    )
+
+    # Delete the conversation
+    await db.execute(
+        delete(Conversation).where(Conversation.id == conversation_id)
+    )
+
+    await db.commit()
+
+    return {"success": True, "deleted": str(conversation_id)}
+
+
 @router.get("/conversations/{conversation_id}/messages")
 async def get_conversation_messages(
     conversation_id: UUID,
     limit: int = 10,
+    current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get messages from a conversation.
@@ -677,11 +793,21 @@ async def get_conversation_messages(
     Args:
         conversation_id: The conversation UUID
         limit: Max messages to return
+        current_user: The authenticated user
         db: Database session
 
     Returns:
         List of messages
     """
+    # First verify the conversation belongs to the user
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conversation_id)
+        .where(Conversation.user_id == UUID(current_user.user_id))
+    )
+    if not conv_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
