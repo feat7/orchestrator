@@ -4,7 +4,7 @@ This module provides ground-truth evaluation for search quality.
 Each benchmark query has a relevance checker that determines if a
 search result is relevant based on expected patterns.
 
-Target: Precision@5 > 0.8 (assignment requirement)
+Target: Precision@5 > 0.8
 """
 
 from dataclasses import dataclass
@@ -60,7 +60,7 @@ def _check_mime_type(result: dict, mime_types: list[str]) -> bool:
 
 
 # =============================================================================
-# Benchmark Queries - Based on Assignment Examples
+# Benchmark Queries
 # These are customizable - update to match your synced data for accurate P@5
 # =============================================================================
 

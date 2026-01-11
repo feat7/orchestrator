@@ -1492,7 +1492,7 @@ async def get_precision_metrics(
     This endpoint runs predefined benchmark queries against the user's
     synced data and calculates Precision@5 for search quality evaluation.
 
-    Target: Precision@5 > 0.8 (assignment requirement)
+    Target: Precision@5 > 0.8
 
     Returns:
         Benchmark results with overall P@5 and per-query details
