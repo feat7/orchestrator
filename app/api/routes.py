@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, desc
 
-from app.db.database import get_db
+from app.db.database import get_db, async_session
 from app.db.models import User, Conversation, Message, SyncStatus
 from app.schemas.query import (
     QueryRequest,
@@ -50,6 +50,7 @@ router = APIRouter()
 
 
 import time
+from datetime import datetime
 
 # Store metrics in memory (in production, use Redis/Prometheus)
 _metrics = {
@@ -267,6 +268,7 @@ async def _stream_query_response(
     synthesizer: ResponseSynthesizer,
     cache: CacheService,
     conversation_context: list,
+    is_new_conversation: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Stream query processing with status updates via SSE.
 
@@ -464,6 +466,40 @@ async def _stream_query_response(
                 {"query": query, "response": response_text, "intent": intent.model_dump()},
             )
 
+            # Persist to database
+            if is_new_conversation:
+                # Create conversation with title from first query (truncated)
+                title = query[:100] + "..." if len(query) > 100 else query
+                conversation = Conversation(
+                    id=conversation_id,
+                    user_id=UUID(user_id),
+                    title=title,
+                )
+                db.add(conversation)
+
+            # Save message to database
+            message = Message(
+                conversation_id=conversation_id,
+                query=query,
+                intent=intent.model_dump(),
+                response=response_text,
+                actions_taken=actions_taken,
+            )
+            db.add(message)
+            logger.info(f"[CONTEXT_DEBUG] Saving message to DB: conversation_id={conversation_id}, query='{query[:50]}...'")
+
+            # Update conversation's updated_at timestamp
+            if not is_new_conversation:
+                from sqlalchemy import update
+                await db.execute(
+                    update(Conversation)
+                    .where(Conversation.id == conversation_id)
+                    .values(updated_at=datetime.utcnow())
+                )
+
+            await db.commit()
+            logger.info(f"[CONTEXT_DEBUG] Message saved successfully to DB")
+
             latency_ms = int((time.time() - start_time) * 1000)
             _metrics["latencies"].append(latency_ms)
 
@@ -492,6 +528,66 @@ async def _stream_query_response(
             })
 
 
+async def _load_conversation_context_from_db(
+    conversation_id: UUID, limit: int = 5
+) -> list[dict]:
+    """Load conversation context from the database.
+
+    Args:
+        conversation_id: The conversation ID
+        limit: Max messages to return
+
+    Returns:
+        List of message dictionaries with query/response pairs
+    """
+    try:
+        async with async_session() as db:
+            logger.info(f"[CONTEXT_DEBUG] Loading context from DB for conversation: {conversation_id} (type: {type(conversation_id)})")
+
+            # First, check if the conversation exists
+            conv_result = await db.execute(
+                select(Conversation).where(Conversation.id == conversation_id)
+            )
+            conv = conv_result.scalar_one_or_none()
+            logger.info(f"[CONTEXT_DEBUG] Conversation exists: {conv is not None}")
+
+            # Now get messages
+            result = await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(desc(Message.created_at))
+                .limit(limit)
+            )
+            messages = result.scalars().all()
+            logger.info(f"[CONTEXT_DEBUG] Found {len(messages)} messages in DB for conversation {conversation_id}")
+
+            # Log message details for debugging
+            if messages:
+                for i, msg in enumerate(messages):
+                    logger.info(f"[CONTEXT_DEBUG] Message {i}: query='{msg.query[:50]}...', response_len={len(msg.response or '')}")
+            else:
+                logger.info(f"[CONTEXT_DEBUG] No messages found! Checking all messages table...")
+                # Debug: check if there are ANY messages in the DB
+                all_count = await db.execute(select(Message))
+                all_msgs = all_count.scalars().all()
+                logger.info(f"[CONTEXT_DEBUG] Total messages in DB: {len(all_msgs)}")
+                if all_msgs:
+                    logger.info(f"[CONTEXT_DEBUG] Sample message conversation_ids: {[str(m.conversation_id) for m in all_msgs[:3]]}")
+
+            # Convert to context format and reverse to chronological order
+            context = []
+            for msg in reversed(messages):
+                context.append({
+                    "query": msg.query,
+                    "response": msg.response,
+                    "intent": msg.intent,
+                })
+            return context
+    except Exception as e:
+        logger.error(f"[CONTEXT_DEBUG] Failed to load context from DB: {e}", exc_info=True)
+        return []
+
+
 @router.post("/query/stream")
 async def process_query_stream(
     request: QueryRequest,
@@ -511,9 +607,16 @@ async def process_query_stream(
 
     Use this endpoint for a more responsive UI experience.
     """
-    conversation_id = request.conversation_id or uuid4()
+    # Detailed logging of incoming request
+    logger.info(f"[CONTEXT_DEBUG] === NEW STREAM REQUEST ===")
+    logger.info(f"[CONTEXT_DEBUG] Raw request.conversation_id: {request.conversation_id}")
+    logger.info(f"[CONTEXT_DEBUG] request.conversation_id type: {type(request.conversation_id)}")
+    logger.info(f"[CONTEXT_DEBUG] Query: '{request.query[:100]}...'")
 
-    # Get conversation context from cache
+    conversation_id = request.conversation_id or uuid4()
+    logger.info(f"[CONTEXT_DEBUG] Using conversation_id: {conversation_id} (type: {type(conversation_id)})")
+
+    # Get conversation context from cache, fallback to database
     conversation_context = []
     if request.conversation_id:
         conversation_context = await cache.get_conversation_context(
@@ -521,12 +624,29 @@ async def process_query_stream(
         )
         if conversation_context:
             _metrics["cache_hits"] += 1
-            logger.info(f"Loaded {len(conversation_context)} context messages for conversation {request.conversation_id}")
+            logger.info(f"Loaded {len(conversation_context)} context messages from cache for conversation {request.conversation_id}")
         else:
-            _metrics["cache_misses"] += 1
-            logger.debug(f"No conversation context found for {request.conversation_id}")
+            # Fallback to database
+            conversation_context = await _load_conversation_context_from_db(
+                request.conversation_id
+            )
+            if conversation_context:
+                logger.info(f"Loaded {len(conversation_context)} context messages from database for conversation {request.conversation_id}")
+                # Repopulate the cache for future requests
+                for msg in conversation_context:
+                    await cache.add_to_conversation(str(request.conversation_id), msg)
+            else:
+                _metrics["cache_misses"] += 1
+                logger.info(f"[CONTEXT_DEBUG] No conversation context found in cache or DB for {request.conversation_id}")
 
-    logger.info(f"Processing streaming query: '{request.query[:100]}...' with {len(conversation_context)} context messages")
+    # Determine if this is a new conversation
+    is_new_conversation = request.conversation_id is None
+
+    logger.info(f"[CONTEXT_DEBUG] Processing streaming query: '{request.query[:100]}...' with {len(conversation_context)} context messages")
+    if conversation_context:
+        logger.info(f"[CONTEXT_DEBUG] Context preview: {[{k: (v[:80] + '...' if isinstance(v, str) and len(v) > 80 else v) for k, v in c.items() if k != 'intent'} for c in conversation_context[:2]]}")
+    else:
+        logger.info(f"[CONTEXT_DEBUG] NO context available for this query!")
 
     return StreamingResponse(
         _stream_query_response(
@@ -537,6 +657,7 @@ async def process_query_stream(
             synthesizer=synthesizer,
             cache=cache,
             conversation_context=conversation_context,
+            is_new_conversation=is_new_conversation,
         ),
         media_type="text/event-stream",
         headers={
@@ -666,10 +787,88 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.get("/conversations")
+async def list_conversations(
+    limit: int = 20,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List conversations for the current user.
+
+    Args:
+        limit: Max conversations to return (default 20)
+        current_user: The authenticated user
+        db: Database session
+
+    Returns:
+        List of conversations with id, title, and timestamps
+    """
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.user_id == UUID(current_user.user_id))
+        .order_by(Conversation.updated_at.desc())
+        .limit(limit)
+    )
+    conversations = result.scalars().all()
+
+    return [
+        {
+            "id": str(conv.id),
+            "title": conv.title or "Untitled",
+            "created_at": conv.created_at.isoformat() + "Z" if conv.created_at else None,
+            "updated_at": conv.updated_at.isoformat() + "Z" if conv.updated_at else None,
+        }
+        for conv in conversations
+    ]
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a conversation and all its messages.
+
+    Args:
+        conversation_id: The conversation UUID
+        current_user: The authenticated user
+        db: Database session
+
+    Returns:
+        Success status
+    """
+    from sqlalchemy import delete
+
+    # First verify the conversation belongs to the user
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conversation_id)
+        .where(Conversation.user_id == UUID(current_user.user_id))
+    )
+    if not conv_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Delete messages first (foreign key constraint)
+    await db.execute(
+        delete(Message).where(Message.conversation_id == conversation_id)
+    )
+
+    # Delete the conversation
+    await db.execute(
+        delete(Conversation).where(Conversation.id == conversation_id)
+    )
+
+    await db.commit()
+
+    return {"success": True, "deleted": str(conversation_id)}
+
+
 @router.get("/conversations/{conversation_id}/messages")
 async def get_conversation_messages(
     conversation_id: UUID,
     limit: int = 10,
+    current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get messages from a conversation.
@@ -677,11 +876,21 @@ async def get_conversation_messages(
     Args:
         conversation_id: The conversation UUID
         limit: Max messages to return
+        current_user: The authenticated user
         db: Database session
 
     Returns:
         List of messages
     """
+    # First verify the conversation belongs to the user
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conversation_id)
+        .where(Conversation.user_id == UUID(current_user.user_id))
+    )
+    if not conv_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)

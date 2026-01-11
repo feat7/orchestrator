@@ -63,34 +63,41 @@ AVAILABLE TOOLS AND THEIR PARAMETERS:
    - after_date: ISO date string
    - before_date: ISO date string
 
-3. search_calendar - Search calendar events
+3. get_email - Get full email content (REQUIRES search_gmail first to find the email)
+   params:
+   - email_id: string (from search results)
+   - subject: string (for reference/fallback search)
+   IMPORTANT: Always add search_gmail step BEFORE get_email with depends_on: [search_step_index]
+   Use this when user wants to see the full content of an email found in a previous search.
+
+4. search_calendar - Search calendar events
    params:
    - search_query: string (semantic search for event content)
    - start_after: ISO datetime (e.g., "{iso_today}T00:00:00")
    - start_before: ISO datetime
    - attendee: string (email or name)
 
-4. get_file - Get file details (REQUIRES search_drive first to get file_id)
+5. get_file - Get file details (REQUIRES search_drive first to get file_id)
    params:
    - file_id: string (from search results)
    - file_name: string (for reference)
    IMPORTANT: Always add search_drive step BEFORE get_file with depends_on: [search_step_index]
 
-5. draft_email - Create email draft (ALWAYS use this before send_email)
+6. draft_email - Create email draft (ALWAYS use this before send_email)
    params:
    - to: string (email address if known)
    - to_name: string (recipient name, for resolving email from search)
    - subject: string (optional)
    - message: string (the message intent/content)
 
-6. send_email - Send email (only after user confirms draft)
+7. send_email - Send email (only after user confirms draft)
    params:
    - draft_id: string (from previous draft result)
    - to: string
    - subject: string
    - body: string
 
-7. create_event - Create calendar event
+8. create_event - Create calendar event
    params:
    - title: string (required)
    - start_time: ISO datetime (required)
@@ -99,7 +106,7 @@ AVAILABLE TOOLS AND THEIR PARAMETERS:
    - description: string
    - location: string
 
-8. share_file - Share a file
+9. share_file - Share a file
    params:
    - file_id: string (from search)
    - email: string (who to share with)
@@ -229,6 +236,47 @@ Query: "emails from Sarah last week"
   "confidence": 0.95
 }}
 
+FOLLOW-UP QUERIES ABOUT PREVIOUS RESULTS:
+When user asks about something from a previous search/response (e.g., "tell me more about that", "show me the full email", "open that file", "what's in it"):
+- Look at the conversation context to identify what "that" or "it" refers to
+- Extract relevant identifiers (email subject, file name, etc.) from the previous response
+- Create appropriate search/get steps to fetch the full details
+
+Example 1: If previous response found "email about HeyGen training", and user says "tell me more about that" or "show me the full email":
+{{
+  "services": ["gmail"],
+  "operation": "search",
+  "steps": [
+    {{"step": "search_gmail", "params": {{"search_query": "HeyGen training"}}}},
+    {{"step": "get_email", "params": {{"subject": "HeyGen training"}}, "depends_on": [0]}}
+  ],
+  "confidence": 0.9
+}}
+
+Example 2: If previous response found files, and user says "show me the first one" or "open that":
+{{
+  "services": ["gdrive"],
+  "operation": "search",
+  "steps": [
+    {{"step": "search_drive", "params": {{"search_query": "[file name from context]"}}}},
+    {{"step": "get_file", "params": {{"file_name": "[file name from context]"}}, "depends_on": [0]}}
+  ],
+  "confidence": 0.9
+}}
+
+Example 3: "what does it say" or "read it to me" after finding an email:
+{{
+  "services": ["gmail"],
+  "operation": "search",
+  "steps": [
+    {{"step": "search_gmail", "params": {{"search_query": "[topic from context]"}}}},
+    {{"step": "get_email", "params": {{"subject": "[subject from context]"}}, "depends_on": [0]}}
+  ],
+  "confidence": 0.9
+}}
+
+IMPORTANT: Do NOT ask for clarification if the context makes it clear what the user is referring to. Use the conversation history to resolve ambiguous references like "that", "it", "the email", "the file", etc. When only ONE item was found/mentioned in the previous response, assume the user is referring to that item.
+
 SEND CONFIRMATION:
 When user confirms a draft (e.g., "yes", "send it", "looks good"):
 - Check conversation for draft details (Draft ID, to, subject, body)
@@ -318,9 +366,10 @@ class IntentClassifier:
 
         prompt += "\n\nClassify this query and return JSON with exact parameters:"
 
-        logger.info(f"Classifying query: {query[:100]}...")
+        logger.info(f"[CONTEXT_DEBUG] Classifying query: {query[:100]}...")
         if conversation_context:
-            logger.debug(f"With conversation context: {len(conversation_context)} messages")
+            logger.info(f"[CONTEXT_DEBUG] With conversation context: {len(conversation_context)} messages")
+            logger.info(f"[CONTEXT_DEBUG] Full prompt being sent to LLM:\n{prompt[:1000]}...")
 
         # Get LLM response with timeout
         try:

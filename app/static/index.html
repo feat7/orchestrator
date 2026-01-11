@@ -108,6 +108,72 @@
             padding: 8px 8px 12px;
         }
 
+        .conv-item {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 4px;
+            transition: background 0.15s;
+        }
+
+        .conv-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .conv-item.active {
+            background: var(--bg-tertiary);
+        }
+
+        .conv-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .conv-title {
+            font-size: 13px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .conv-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .conv-delete {
+            display: none;
+            padding: 4px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 4px;
+            flex-shrink: 0;
+            margin-left: 4px;
+        }
+
+        .conv-delete:hover {
+            background: var(--bg-tertiary);
+            color: #ef4444;
+        }
+
+        .conv-item:hover .conv-delete {
+            display: flex;
+        }
+
+        .no-conversations {
+            font-size: 12px;
+            color: var(--text-muted);
+            padding: 8px 12px;
+            text-align: center;
+        }
+
         .sidebar-footer {
             padding: 12px;
             border-top: 1px solid var(--border);
@@ -259,12 +325,6 @@
             background: var(--bg-hover);
         }
 
-        .latency {
-            font-size: 12px;
-            color: var(--text-muted);
-            font-variant-numeric: tabular-nums;
-        }
-
         .header-right {
             display: flex;
             align-items: center;
@@ -290,20 +350,19 @@
             color: var(--text-primary);
         }
 
-        .user-btn {
+        .avatar-btn {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 4px 10px 4px 4px;
+            justify-content: center;
+            padding: 4px;
             background: none;
             border: 1px solid var(--border);
-            border-radius: 6px;
-            color: var(--text-secondary);
             cursor: pointer;
+            border-radius: 6px;
             transition: all 0.15s;
         }
 
-        .user-btn:hover {
+        .avatar-btn:hover {
             background: var(--bg-hover);
         }
 
@@ -320,12 +379,23 @@
             color: var(--text-secondary);
         }
 
-        .user-email {
-            font-size: 13px;
-            max-width: 120px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+        /* Theme toggle icons */
+        .icon-sun, .icon-moon {
+            display: none;
+        }
+
+        /* Dark mode (default): show sun icon */
+        .icon-sun {
+            display: block;
+        }
+
+        /* Light mode: show moon icon */
+        body.light .icon-sun {
+            display: none;
+        }
+
+        body.light .icon-moon {
+            display: block;
         }
 
         .dropdown {
@@ -344,6 +414,22 @@
 
         .dropdown.show {
             display: block;
+        }
+
+        .dropdown-header {
+            padding: 10px 12px 8px;
+        }
+
+        .dropdown-email {
+            font-size: 13px;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .dropdown-divider {
+            height: 1px;
+            background: var(--border);
+            margin: 4px 0;
         }
 
         .dropdown-item {
@@ -848,6 +934,7 @@
 
             <div class="sidebar-content">
                 <div class="section-label">Recent</div>
+                <div id="conversation-list"></div>
             </div>
 
             <div class="sidebar-footer" id="sidebar-footer" style="display: none;">
@@ -892,22 +979,27 @@
                             <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
                         </svg>
                     </button>
-                    <span class="latency" id="latency"></span>
                 </div>
 
                 <div class="header-right">
-                    <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+                    <button class="icon-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">
+                        <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                        </svg>
+                        <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                         </svg>
                     </button>
-                    <button class="user-btn" id="user-btn" onclick="toggleDropdown()">
+                    <button class="avatar-btn" id="user-btn" onclick="toggleDropdown()">
                         <div class="avatar" id="avatar">?</div>
-                        <span class="user-email" id="user-email">Sign in</span>
                     </button>
                 </div>
 
                 <div class="dropdown" id="dropdown">
+                    <div class="dropdown-header">
+                        <div class="dropdown-email" id="dropdown-email">Not signed in</div>
+                    </div>
+                    <div class="dropdown-divider"></div>
                     <div class="dropdown-item danger" onclick="logout()">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
@@ -1004,6 +1096,7 @@
         });
 
         document.addEventListener('DOMContentLoaded', () => {
+            initTheme();
             checkAuth();
             const p = new URLSearchParams(location.search);
             if (p.get('auth') === 'success') history.replaceState({}, '', '/');
@@ -1027,6 +1120,15 @@
 
         function toggleTheme() {
             document.body.classList.toggle('light');
+            const isLight = document.body.classList.contains('light');
+            localStorage.setItem('theme', isLight ? 'light' : 'dark');
+        }
+
+        function initTheme() {
+            const saved = localStorage.getItem('theme');
+            if (saved === 'light') {
+                document.body.classList.add('light');
+            }
         }
 
         async function checkAuth() {
@@ -1040,18 +1142,19 @@
         function showAuth(d) {
             email = d.email || 'User';
             document.getElementById('avatar').textContent = email.substring(0, 2).toUpperCase();
-            document.getElementById('user-email').textContent = email;
+            document.getElementById('dropdown-email').textContent = email;
             document.getElementById('sidebar-footer').style.display = 'block';
             document.getElementById('welcome').style.display = 'flex';
             document.getElementById('input-area').style.display = 'block';
             document.getElementById('auth').style.display = 'none';
             refreshSync();
             loadSettings();
+            loadConversations();
         }
 
         function showUnauth() {
             document.getElementById('avatar').textContent = '?';
-            document.getElementById('user-email').textContent = 'Sign in';
+            document.getElementById('dropdown-email').textContent = 'Not signed in';
             document.getElementById('sidebar-footer').style.display = 'none';
             document.getElementById('welcome').style.display = 'none';
             document.getElementById('messages').style.display = 'none';
@@ -1069,7 +1172,129 @@
             document.getElementById('messages').innerHTML = '';
             document.getElementById('messages').style.display = 'none';
             document.getElementById('welcome').style.display = 'flex';
+            // Deselect active conversation in sidebar
+            document.querySelectorAll('.conv-item.active').forEach(el => el.classList.remove('active'));
             toggleSidebar();
+        }
+
+        async function loadConversations() {
+            try {
+                const r = await fetch(`${API}/conversations`, { credentials: 'include' });
+                if (!r.ok) return;
+                const convs = await r.json();
+                renderConversations(convs);
+            } catch (e) {
+                console.error('Failed to load conversations:', e);
+            }
+        }
+
+        function renderConversations(convs) {
+            const container = document.getElementById('conversation-list');
+            if (!convs.length) {
+                container.innerHTML = '<div class="no-conversations">No conversations yet</div>';
+                return;
+            }
+            container.innerHTML = convs.map(c => `
+                <div class="conv-item ${convId === c.id ? 'active' : ''}" data-conv-id="${c.id}">
+                    <div class="conv-content" onclick="loadConversation('${c.id}')">
+                        <div class="conv-title">${esc(c.title)}</div>
+                        <div class="conv-time">${formatConvTime(c.updated_at)}</div>
+                    </div>
+                    <button class="conv-delete" onclick="event.stopPropagation(); deleteConversation('${c.id}')" title="Delete">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        async function deleteConversation(id) {
+            if (!confirm('Delete this conversation?')) return;
+            try {
+                const r = await fetch(`${API}/conversations/${id}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+                if (r.ok) {
+                    // If we deleted the current conversation, start a new chat
+                    if (convId === id) {
+                        convId = null;
+                        document.getElementById('messages').innerHTML = '';
+                        document.getElementById('messages').style.display = 'none';
+                        document.getElementById('welcome').style.display = 'flex';
+                    }
+                    loadConversations();
+                }
+            } catch (e) {
+                console.error('Failed to delete conversation:', e);
+            }
+        }
+
+        function formatConvTime(d) {
+            if (!d) return '';
+            const date = new Date(d);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return diffMins + 'm ago';
+            if (diffMins < 1440) return Math.floor(diffMins / 60) + 'h ago';
+            if (diffMins < 10080) return Math.floor(diffMins / 1440) + 'd ago';
+            return date.toLocaleDateString();
+        }
+
+        async function loadConversation(id) {
+            console.log('[CONTEXT_DEBUG] Loading conversation:', id, 'type:', typeof id);
+            try {
+                // Fetch messages for this conversation
+                const r = await fetch(`${API}/conversations/${id}/messages?limit=50`, { credentials: 'include' });
+                if (!r.ok) return;
+                const messages = await r.json();
+                console.log('[CONTEXT_DEBUG] Loaded', messages.length, 'messages for conversation', id);
+
+                // Set current conversation ID
+                convId = id;
+                console.log('[CONTEXT_DEBUG] convId set to:', convId);
+
+                // Update active state in sidebar
+                document.querySelectorAll('.conv-item').forEach(el => {
+                    el.classList.toggle('active', el.dataset.convId === id);
+                });
+
+                // Hide welcome, show messages
+                document.getElementById('welcome').style.display = 'none';
+                const msgContainer = document.getElementById('messages');
+                msgContainer.style.display = 'block';
+                msgContainer.innerHTML = '';
+
+                // Render messages (in chronological order - API returns desc)
+                messages.reverse().forEach(msg => {
+                    addMsg(msg.query, 'user');
+                    if (msg.response) {
+                        addAssistantMsg(msg.response);
+                    }
+                });
+
+                scrollBottom();
+                toggleSidebar();
+            } catch (e) {
+                console.error('Failed to load conversation:', e);
+            }
+        }
+
+        function addAssistantMsg(text) {
+            const m = document.getElementById('messages');
+            const d = document.createElement('div');
+            d.className = 'message';
+            d.innerHTML = `
+                <div class="message-header">
+                    <div class="message-avatar">AI</div>
+                    <span class="message-name">Assistant</span>
+                </div>
+                <div class="message-body">${marked.parse(text)}</div>
+            `;
+            m.appendChild(d);
         }
 
         function sendSuggestion(t) {
@@ -1107,6 +1332,9 @@
             const sid = addStatus();
 
             try {
+                // Debug: Log what we're sending
+                console.log('[CONTEXT_DEBUG] Sending message:', { query: q, conversation_id: convId, convIdType: typeof convId });
+
                 const r = await fetch(`${API}/query/stream`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1142,14 +1370,19 @@
                 }
 
                 if (final) {
-                    if (final.conversation_id) convId = final.conversation_id;
+                    console.log('[CONTEXT_DEBUG] Response received, conversation_id:', final.conversation_id);
+                    if (final.conversation_id) {
+                        convId = final.conversation_id;
+                        console.log('[CONTEXT_DEBUG] convId updated to:', convId);
+                    }
                     if (final.needs_clarification) {
                         removeEl(sid);
                         addClarify(final.response, final.options);
                     } else {
                         finalize(sid, final.actions_taken, final.latency_ms);
                     }
-                    document.getElementById('latency').textContent = final.latency_ms + 'ms';
+                    // Refresh conversation list in sidebar
+                    loadConversations();
                 }
             } catch (err) {
                 removeEl(sid);
