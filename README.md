@@ -4,10 +4,12 @@ An intelligent orchestrator that executes natural language queries across Gmail,
 
 ## Features
 
-- **Intent Classification**: LLM-powered parsing of natural language into structured intents
-- **Multi-Service Orchestration**: Execute queries across Gmail, Calendar, and Drive in parallel
-- **Semantic Search**: Vector similarity search using pgvector for relevant results
-- **Natural Language Responses**: Conversational responses synthesized by LLM
+- **Intent Classification**: LLM-powered parsing of natural language into structured intents with conversation context support
+- **Multi-Service Orchestration**: Execute queries across Gmail, Calendar, and Drive with DAG-based parallel execution
+- **Hybrid Search**: 3-way Reciprocal Rank Fusion combining BM25, vector similarity, and filtered search
+- **Streaming Responses**: Real-time SSE streaming for conversational UX
+- **Email Composition**: LLM-powered email drafting with automatic recipient resolution
+- **Background Sync**: Celery workers for incremental Google API synchronization
 
 ## Quick Start
 
@@ -20,7 +22,6 @@ An intelligent orchestrator that executes natural language queries across Gmail,
 
 1. **Clone and configure:**
    ```bash
-   cd dalat-v1
    cp .env.example .env
    # Edit .env with your API keys
    ```
@@ -50,29 +51,27 @@ An intelligent orchestrator that executes natural language queries across Gmail,
    uvicorn app.main:app --reload
    ```
 
-7. **Try a query:**
-   ```bash
-   curl -X POST http://localhost:8000/api/v1/query \
-     -H "Content-Type: application/json" \
-     -d '{"query": "What'\''s on my calendar next week?"}'
+7. **Open the UI:**
+   ```
+   http://localhost:8000/
    ```
 
-## Project Structure
+## Architecture
 
+```mermaid
+flowchart LR
+    Q[Query] --> IC[Intent Classifier]
+    IC --> QP[Query Planner]
+    QP --> O[Orchestrator]
+    O --> GA[Gmail Agent]
+    O --> CA[Calendar Agent]
+    O --> DA[Drive Agent]
+    GA & CA & DA --> DB[(pgvector)]
+    GA & CA & DA --> RS[Response Synthesizer]
+    RS --> R[Streaming Response]
 ```
-dalat-v1/
-├── app/
-│   ├── api/              # API routes and dependencies
-│   ├── core/             # Core logic (intent, planner, orchestrator)
-│   ├── agents/           # Service agents (gmail, gcal, gdrive)
-│   ├── services/         # Google services and utilities
-│   ├── db/               # Database models and connection
-│   └── schemas/          # Pydantic schemas
-├── alembic/              # Database migrations
-├── tests/                # Test suite
-├── docs/                 # Documentation
-└── scripts/              # Utility scripts
-```
+
+See [Design Documentation](docs/DESIGN.md) for detailed architecture and scaling strategy.
 
 ## Sample Queries
 
@@ -86,28 +85,41 @@ dalat-v1/
 - "Prepare for tomorrow's meeting with Acme Corp"
 - "Find events that conflict with my out-of-office doc"
 
+**Actions:**
+- "Draft an email to John about the project update"
+- "Send it" (after reviewing draft)
+- "Create a meeting with Sarah tomorrow at 2pm"
+
+## Project Structure
+
+```
+├── app/
+│   ├── api/              # API routes and dependencies
+│   ├── core/             # Core logic (intent, planner, orchestrator, synthesizer)
+│   ├── agents/           # Service agents (gmail, gcal, gdrive)
+│   ├── services/         # Google services, embedding, cache
+│   ├── db/               # Database models and connection
+│   ├── schemas/          # Pydantic schemas
+│   ├── evaluation/       # Search quality benchmarks
+│   └── static/           # Web UI
+├── alembic/              # Database migrations
+├── tests/                # Test suite
+├── docs/                 # Documentation
+└── scripts/              # Utility scripts
+```
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/v1/query` | Process natural language query |
+| POST | `/api/v1/query/stream` | Streaming query response (SSE) |
 | GET | `/api/v1/health` | Health check |
 | POST | `/api/v1/sync/trigger` | Trigger data sync |
 | GET | `/api/v1/sync/status` | Get sync status |
+| GET | `/api/v1/metrics/precision` | Search quality benchmark |
 
 See [API Documentation](docs/API.md) for details.
-
-## Architecture
-
-```
-Query → Intent Classifier → Query Planner → Orchestrator → Response
-                                    ↓
-                    [Gmail, Calendar, Drive Agents]
-                                    ↓
-                         pgvector (Semantic Search)
-```
-
-See [Design Documentation](docs/DESIGN.md) for scaling strategy.
 
 ## Configuration
 
@@ -130,6 +142,9 @@ pytest --cov=app
 
 # Run specific test file
 pytest tests/test_intent.py
+
+# Run search quality benchmark
+pytest tests/test_precision.py
 ```
 
 ## Development
@@ -145,17 +160,17 @@ mypy app
 ruff app
 ```
 
-## Restrictions
+## Technical Notes
 
-Per assignment requirements:
-- No LangChain, LlamaIndex, or agent frameworks
-- No managed vector DBs (Pinecone, etc.)
-- Orchestration built from scratch
-- Using pgvector for vector search
+- Built without agent frameworks (LangChain, LlamaIndex) for full control
+- Uses pgvector for self-hosted vector search with IVFFlat indexes
+- Custom orchestration with DAG-based parallel execution
+- Hybrid search using Reciprocal Rank Fusion (RRF)
+- SSE streaming for real-time responses
 
 ## Documentation
 
-- [System Design](docs/DESIGN.md) - Architecture and scaling
+- [System Design](docs/DESIGN.md) - Architecture, ER diagrams, and scaling
 - [API Reference](docs/API.md) - Endpoint documentation
 - [Sample Queries](docs/sample_queries.md) - Test cases with expected outputs
 
