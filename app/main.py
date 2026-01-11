@@ -104,3 +104,21 @@ async def root():
         "docs": "/docs",
         "health": "/api/v1/health",
     }
+
+
+@app.get("/privacy", tags=["legal"])
+async def privacy():
+    """Serve privacy policy."""
+    privacy_path = static_dir / "privacy.html"
+    if privacy_path.exists():
+        return FileResponse(privacy_path)
+    return {"error": "Privacy policy not found"}
+
+
+@app.get("/terms", tags=["legal"])
+async def terms():
+    """Serve terms of service."""
+    terms_path = static_dir / "terms.html"
+    if terms_path.exists():
+        return FileResponse(terms_path)
+    return {"error": "Terms of service not found"}
