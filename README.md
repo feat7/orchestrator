@@ -66,10 +66,33 @@ flowchart LR
     O --> GA[Gmail Agent]
     O --> CA[Calendar Agent]
     O --> DA[Drive Agent]
-    GA & CA & DA --> DB[(pgvector)]
-    GA & CA & DA --> RS[Response Synthesizer]
+    GA & CA & DA --> HS[Hybrid Search]
+    HS --> RS[Response Synthesizer]
     RS --> R[Streaming Response]
 ```
+
+### Hybrid Search Architecture
+
+We use **3-way Reciprocal Rank Fusion (RRF)** to combine multiple search methods:
+
+```mermaid
+flowchart TB
+    Q[User Query] --> E[Generate Embedding]
+    E --> BM25[BM25 Full-Text<br/>PostgreSQL ts_vector]
+    E --> VEC[Vector Similarity<br/>pgvector cosine]
+    E --> FIL[Filtered Vector<br/>+ metadata filters]
+    BM25 --> RRF[RRF Fusion<br/>score = Σ 1/k+rank]
+    VEC --> RRF
+    FIL --> RRF
+    RRF --> BOOST[Filter Boost 1.5x]
+    BOOST --> TOP[Top 10 Results]
+```
+
+| Method | What It Does | Latency |
+|--------|--------------|---------|
+| **BM25** | PostgreSQL full-text search | ~5ms |
+| **Vector** | Cosine similarity on embeddings | ~20ms |
+| **Filtered** | Vector + metadata (sender, date) | ~20ms |
 
 See [Design Documentation](docs/DESIGN.md) for detailed architecture and scaling strategy.
 

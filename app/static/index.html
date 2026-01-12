@@ -1057,8 +1057,8 @@
                         </svg>
                     </div>
                     <h2 class="auth-title">Connect your workspace</h2>
-                    <p class="auth-subtitle">Sign in with Google to search your emails, calendar, and Drive files.</p>
-                    <a href="/api/v1/auth/login" class="google-btn">
+                    <p class="auth-subtitle" id="auth-subtitle">Sign in with Google to search your emails, calendar, and Drive files.</p>
+                    <a href="/api/v1/auth/login" class="google-btn" id="google-btn">
                         <svg width="18" height="18" viewBox="0 0 24 24">
                             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
                             <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -1067,6 +1067,12 @@
                         </svg>
                         Continue with Google
                     </a>
+                    <button class="google-btn" id="demo-btn" style="display: none; margin-top: 12px;" onclick="demoLogin()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1f1f1f" stroke-width="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                        </svg>
+                        Continue as Demo User
+                    </button>
                 </div>
             </div>
         </main>
@@ -1131,12 +1137,15 @@
             }
         }
 
+        let isMockMode = false;
+
         async function checkAuth() {
             try {
                 const r = await fetch(`${API}/auth/status`, { credentials: 'include' });
                 const d = await r.json();
-                d.authenticated ? showAuth(d) : showUnauth();
-            } catch { showUnauth(); }
+                isMockMode = d.mode === 'mock';
+                d.authenticated ? showAuth(d) : showUnauth(d);
+            } catch { showUnauth({}); }
         }
 
         function showAuth(d) {
@@ -1152,7 +1161,7 @@
             loadConversations();
         }
 
-        function showUnauth() {
+        function showUnauth(d) {
             document.getElementById('avatar').textContent = '?';
             document.getElementById('dropdown-email').textContent = 'Not signed in';
             document.getElementById('sidebar-footer').style.display = 'none';
@@ -1160,6 +1169,38 @@
             document.getElementById('messages').style.display = 'none';
             document.getElementById('input-area').style.display = 'none';
             document.getElementById('auth').style.display = 'flex';
+
+            // Handle mock mode - show demo button instead of Google
+            const googleBtn = document.getElementById('google-btn');
+            const demoBtn = document.getElementById('demo-btn');
+            const subtitle = document.getElementById('auth-subtitle');
+
+            if (d.mode === 'mock' || isMockMode) {
+                googleBtn.style.display = 'none';
+                demoBtn.style.display = 'inline-flex';
+                subtitle.textContent = 'Demo mode: Click below to login with mock data.';
+            } else {
+                googleBtn.style.display = 'inline-flex';
+                demoBtn.style.display = 'none';
+                subtitle.textContent = 'Sign in with Google to search your emails, calendar, and Drive files.';
+            }
+        }
+
+        async function demoLogin() {
+            try {
+                const r = await fetch(`${API}/auth/demo-login`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                if (r.ok) {
+                    checkAuth();
+                } else {
+                    const d = await r.json();
+                    alert(d.detail || 'Demo login failed');
+                }
+            } catch (e) {
+                alert('Demo login failed: ' + e.message);
+            }
         }
 
         async function logout() {

@@ -929,7 +929,7 @@ async def google_login(request: Request, db: AsyncSession = Depends(get_db)):
     if settings.use_mock_google:
         raise HTTPException(
             status_code=400,
-            detail="Google OAuth is disabled in mock mode. Set USE_MOCK_GOOGLE=false in .env",
+            detail="Google OAuth is disabled in mock mode. Use /api/v1/auth/demo-login instead.",
         )
 
     auth_service = GoogleAuthService(db)
@@ -939,6 +939,55 @@ async def google_login(request: Request, db: AsyncSession = Depends(get_db)):
     request.session["oauth_state"] = state
 
     return RedirectResponse(url=authorization_url)
+
+
+@router.post("/auth/demo-login")
+async def demo_login(request: Request, db: AsyncSession = Depends(get_db)):
+    """Login as demo user in mock mode.
+
+    This endpoint is only available when USE_MOCK_GOOGLE=true.
+    Creates or uses the demo user and sets session cookie.
+
+    Use this for testing without Google OAuth.
+
+    Returns:
+        Login status with user info
+    """
+    if not settings.use_mock_google:
+        raise HTTPException(
+            status_code=400,
+            detail="Demo login only available in mock mode. Use /api/v1/auth/login for Google OAuth.",
+        )
+
+    # Demo user ID from seed script
+    DEMO_USER_ID = "00000000-0000-0000-0000-000000000001"
+    DEMO_EMAIL = "demo@example.com"
+
+    # Check if demo user exists, create if not
+    result = await db.execute(
+        select(User).where(User.id == UUID(DEMO_USER_ID))
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        user = User(
+            id=UUID(DEMO_USER_ID),
+            email=DEMO_EMAIL,
+        )
+        db.add(user)
+        await db.commit()
+
+    # Set session
+    request.session["user_id"] = DEMO_USER_ID
+    request.session["email"] = DEMO_EMAIL
+
+    return {
+        "status": "logged_in",
+        "mode": "mock",
+        "user_id": DEMO_USER_ID,
+        "email": DEMO_EMAIL,
+        "message": "Logged in as demo user. Use seeded mock data for testing.",
+    }
 
 
 @router.get("/auth/callback")

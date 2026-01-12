@@ -442,7 +442,7 @@ class DriveService:
         Returns:
             Share result data
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gdrive_mock and self.service:
             try:
                 permission = {
                     "type": "user",
@@ -486,7 +486,7 @@ class DriveService:
         Returns:
             Created folder data
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gdrive_mock and self.service:
             try:
                 file_metadata = {
                     "name": name,
@@ -533,7 +533,7 @@ class DriveService:
         Returns:
             Move result data
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gdrive_mock and self.service:
             try:
                 # Get current parents
                 file = self.service.files().get(

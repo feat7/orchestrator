@@ -1,10 +1,10 @@
 {
   "info": {
     "name": "Google Workspace Orchestrator API",
-    "description": "API collection for the Agentic Google Workspace Orchestrator. This collection contains all endpoints for query processing, sync operations, authentication, and health checks.",
+    "description": "API collection for the Agentic Google Workspace Orchestrator. This collection contains all endpoints for query processing, sync operations, authentication, conversations, user settings, and debugging.\n\n## Authentication\nMost endpoints require authentication via session cookie. In mock mode, use the demo login endpoint.\n\n## Mock Mode\nWhen `USE_MOCK_GOOGLE=true`, the API uses seeded mock data instead of real Google APIs. You can configure per-service mock mode with `USE_MOCK_GMAIL`, `USE_MOCK_GCAL`, `USE_MOCK_GDRIVE`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_postman_id": "gws-orchestrator-api",
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "variable": [
     {
@@ -37,14 +37,6 @@
           "response": [
             {
               "name": "Healthy Response",
-              "originalRequest": {
-                "method": "GET",
-                "url": {
-                  "raw": "{{base_url}}/health",
-                  "host": ["{{base_url}}"],
-                  "path": ["health"]
-                }
-              },
               "status": "OK",
               "code": 200,
               "body": "{\n  \"status\": \"healthy\",\n  \"database\": \"connected\",\n  \"redis\": \"connected\"\n}"
@@ -61,7 +53,42 @@
               "host": ["{{base_url}}"],
               "path": [""]
             },
-            "description": "Root endpoint with service information."
+            "description": "Root endpoint with service information and links."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/metrics",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["metrics"]
+            },
+            "description": "Get performance metrics including query latencies (avg, p50, p95, p99), cache hit rate, and embedding latency."
+          },
+          "response": [
+            {
+              "name": "Metrics Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"total_queries\": 150,\n  \"avg_latency_ms\": 450,\n  \"p50_latency_ms\": 380,\n  \"p95_latency_ms\": 850,\n  \"p99_latency_ms\": 1200,\n  \"cache_hit_rate\": 0.75,\n  \"embedding_latency_ms\": 45,\n  \"search_precision_at_5\": 0.85\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Precision Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/metrics/precision",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["metrics", "precision"]
+            },
+            "description": "Run search quality benchmark and calculate Precision@5. Target: P@5 > 0.8"
           },
           "response": []
         }
@@ -69,9 +96,10 @@
     },
     {
       "name": "Query Processing",
+      "description": "Main query endpoints for natural language processing across Gmail, Calendar, and Drive.",
       "item": [
         {
-          "name": "Process Query - Single Service (Calendar)",
+          "name": "Process Query (Non-Streaming)",
           "request": {
             "method": "POST",
             "header": [
@@ -89,31 +117,46 @@
               "host": ["{{base_url}}{{api_prefix}}"],
               "path": ["query"]
             },
-            "description": "Search calendar for upcoming events."
+            "description": "Process a natural language query. Returns complete response after all processing is done."
           },
           "response": [
             {
               "name": "Calendar Search Response",
-              "originalRequest": {
-                "method": "POST",
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"query\": \"What's on my calendar next week?\"\n}"
-                },
-                "url": {
-                  "raw": "{{base_url}}{{api_prefix}}/query",
-                  "host": ["{{base_url}}{{api_prefix}}"],
-                  "path": ["query"]
-                }
-              },
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"response\": \"Here's what's on your calendar next week:\\n- Monday 9:00 AM: Daily Standup\\n- Tuesday 2:00 PM: Acme Corp Quarterly Review\",\n  \"actions_taken\": [\n    {\n      \"step\": \"search_calendar\",\n      \"success\": true,\n      \"data\": {\n        \"results\": [\n          {\n            \"id\": \"event_123\",\n            \"title\": \"Daily Standup\",\n            \"start_time\": \"2024-11-11T09:00:00\"\n          }\n        ]\n      },\n      \"error\": null\n    }\n  ],\n  \"conversation_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"intent\": {\n    \"services\": [\"gcal\"],\n    \"operation\": \"search\",\n    \"entities\": {\"time_range\": \"next_week\"},\n    \"steps\": [\"search_calendar\"],\n    \"confidence\": 0.95\n  }\n}"
+              "body": "{\n  \"response\": \"Here's what's on your calendar next week:\\n- Monday 9:00 AM: Daily Standup\\n- Tuesday 2:00 PM: Acme Corp Quarterly Review\",\n  \"actions_taken\": [\n    {\n      \"step\": \"search_calendar\",\n      \"success\": true,\n      \"data\": {\"results\": [{\"id\": \"event_123\", \"title\": \"Daily Standup\"}]},\n      \"error\": null\n    }\n  ],\n  \"conversation_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"intent\": {\n    \"services\": [\"gcal\"],\n    \"operation\": \"search\",\n    \"confidence\": 0.95\n  },\n  \"latency_ms\": 450\n}"
             }
           ]
         },
         {
-          "name": "Process Query - Single Service (Gmail)",
+          "name": "Process Query (Streaming)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"What's on my calendar next week?\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/query/stream",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["query", "stream"]
+            },
+            "description": "Process a query with real-time streaming updates via Server-Sent Events (SSE).\n\nEvent types:\n- `status`: Processing step updates\n- `step_complete`: When each step finishes\n- `response_chunk`: Streamed parts of the response\n- `done`: Final complete response\n- `error`: If something goes wrong"
+          },
+          "response": []
+        },
+        {
+          "name": "Query - Search Gmail",
           "request": {
             "method": "POST",
             "header": [
@@ -136,7 +179,7 @@
           "response": []
         },
         {
-          "name": "Process Query - Single Service (Drive)",
+          "name": "Query - Search Drive",
           "request": {
             "method": "POST",
             "header": [
@@ -147,19 +190,19 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"query\": \"Show me PDFs in Drive from last month\"\n}"
+              "raw": "{\n  \"query\": \"Show me PDFs in Drive related to budget or contracts\"\n}"
             },
             "url": {
               "raw": "{{base_url}}{{api_prefix}}/query",
               "host": ["{{base_url}}{{api_prefix}}"],
               "path": ["query"]
             },
-            "description": "Search Drive for PDF files from last month."
+            "description": "Search Drive for files matching criteria."
           },
           "response": []
         },
         {
-          "name": "Process Query - Multi-Service (Cancel Flight)",
+          "name": "Query - Multi-Service (Cancel Flight)",
           "request": {
             "method": "POST",
             "header": [
@@ -182,26 +225,14 @@
           "response": [
             {
               "name": "Multi-Service Response",
-              "originalRequest": {
-                "method": "POST",
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"query\": \"Cancel my Turkish Airlines flight\"\n}"
-                },
-                "url": {
-                  "raw": "{{base_url}}{{api_prefix}}/query",
-                  "host": ["{{base_url}}{{api_prefix}}"],
-                  "path": ["query"]
-                }
-              },
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"response\": \"I found your Turkish Airlines booking:\\n- Email: Turkish Airlines Flight Confirmation - TK1234 from reservations@turkishairlines.com\\n- Calendar: Istanbul → NYC Flight TK1234 on Nov 5 at 10:30 AM\\n\\nI've drafted a cancellation email. Would you like me to send it?\",\n  \"actions_taken\": [\n    {\n      \"step\": \"search_gmail\",\n      \"success\": true,\n      \"data\": {\"results\": [{\"id\": \"email_123\", \"subject\": \"Turkish Airlines Flight Confirmation - TK1234\"}]},\n      \"error\": null\n    },\n    {\n      \"step\": \"search_calendar\",\n      \"success\": true,\n      \"data\": {\"results\": [{\"id\": \"event_456\", \"title\": \"Istanbul → NYC Flight TK1234\"}]},\n      \"error\": null\n    },\n    {\n      \"step\": \"draft_email\",\n      \"success\": true,\n      \"data\": {\"draft_id\": \"draft_789\"},\n      \"error\": null\n    }\n  ],\n  \"conversation_id\": \"550e8400-e29b-41d4-a716-446655440001\",\n  \"intent\": {\n    \"services\": [\"gmail\", \"gcal\"],\n    \"operation\": \"update\",\n    \"entities\": {\"airline\": \"Turkish Airlines\", \"action\": \"cancel\"},\n    \"steps\": [\"search_gmail\", \"search_calendar\", \"draft_email\"],\n    \"confidence\": 0.9\n  }\n}"
+              "body": "{\n  \"response\": \"I found your Turkish Airlines booking:\\n- Email: Turkish Airlines Flight Confirmation - TK1234\\n- Calendar: Istanbul - NYC Flight TK1234 on Nov 5\\n\\nI've drafted a cancellation email. Would you like me to send it?\",\n  \"actions_taken\": [\n    {\"step\": \"search_gmail\", \"success\": true, \"data\": {\"results\": [{\"id\": \"email_123\"}]}},\n    {\"step\": \"search_calendar\", \"success\": true, \"data\": {\"results\": [{\"id\": \"event_456\"}]}},\n    {\"step\": \"draft_email\", \"success\": true, \"data\": {\"draft_id\": \"draft_789\"}}\n  ],\n  \"conversation_id\": \"550e8400-e29b-41d4-a716-446655440001\"\n}"
             }
           ]
         },
         {
-          "name": "Process Query - Multi-Service (Meeting Prep)",
+          "name": "Query - Multi-Service (Meeting Prep)",
           "request": {
             "method": "POST",
             "header": [
@@ -224,7 +255,7 @@
           "response": []
         },
         {
-          "name": "Process Query - With Conversation Context",
+          "name": "Query - With Conversation Context",
           "request": {
             "method": "POST",
             "header": [
@@ -247,53 +278,7 @@
           "response": []
         },
         {
-          "name": "Process Query - Ambiguous (Move Meeting)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"query\": \"Move the meeting with John\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}{{api_prefix}}/query",
-              "host": ["{{base_url}}{{api_prefix}}"],
-              "path": ["query"]
-            },
-            "description": "Edge case: Ambiguous query that needs clarification."
-          },
-          "response": []
-        },
-        {
-          "name": "Process Query - Temporal (Next Tuesday)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"query\": \"What meetings do I have next Tuesday?\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}{{api_prefix}}/query",
-              "host": ["{{base_url}}{{api_prefix}}"],
-              "path": ["query"]
-            },
-            "description": "Edge case: Temporal reasoning query."
-          },
-          "response": []
-        },
-        {
-          "name": "Process Query - Multiple Actions",
+          "name": "Query - Draft Email",
           "request": {
             "method": "POST",
             "header": [
@@ -311,14 +296,98 @@
               "host": ["{{base_url}}{{api_prefix}}"],
               "path": ["query"]
             },
-            "description": "Complex query with multiple write operations."
+            "description": "Complex query with multiple write operations (draft email + create calendar event)."
           },
           "response": []
         }
       ]
     },
     {
+      "name": "Conversations",
+      "description": "Manage conversation history for multi-turn interactions.",
+      "item": [
+        {
+          "name": "List Conversations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/conversations?limit=20",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["conversations"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Max conversations to return (default 20)"
+                }
+              ]
+            },
+            "description": "List all conversations for the current user, ordered by most recent."
+          },
+          "response": [
+            {
+              "name": "Conversations List",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"title\": \"What's on my calendar next week?\",\n    \"created_at\": \"2024-11-08T10:30:00Z\",\n    \"updated_at\": \"2024-11-08T10:35:00Z\"\n  },\n  {\n    \"id\": \"550e8400-e29b-41d4-a716-446655440001\",\n    \"title\": \"Find emails from Sarah\",\n    \"created_at\": \"2024-11-07T14:20:00Z\",\n    \"updated_at\": \"2024-11-07T14:25:00Z\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get Conversation Messages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/conversations/550e8400-e29b-41d4-a716-446655440000/messages?limit=10",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["conversations", "550e8400-e29b-41d4-a716-446655440000", "messages"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Max messages to return"
+                }
+              ]
+            },
+            "description": "Get messages from a specific conversation."
+          },
+          "response": [
+            {
+              "name": "Messages List",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"msg-001\",\n    \"query\": \"What's on my calendar next week?\",\n    \"response\": \"Here's what's on your calendar...\",\n    \"intent\": {\"services\": [\"gcal\"], \"operation\": \"search\"},\n    \"created_at\": \"2024-11-08T10:30:00\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Delete Conversation",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/conversations/550e8400-e29b-41d4-a716-446655440000",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["conversations", "550e8400-e29b-41d4-a716-446655440000"]
+            },
+            "description": "Delete a conversation and all its messages."
+          },
+          "response": [
+            {
+              "name": "Delete Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"deleted\": \"550e8400-e29b-41d4-a716-446655440000\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Sync Operations",
+      "description": "Trigger and monitor data synchronization from Google APIs.",
       "item": [
         {
           "name": "Get Sync Status",
@@ -335,14 +404,6 @@
           "response": [
             {
               "name": "Sync Status Response",
-              "originalRequest": {
-                "method": "GET",
-                "url": {
-                  "raw": "{{base_url}}{{api_prefix}}/sync/status",
-                  "host": ["{{base_url}}{{api_prefix}}"],
-                  "path": ["sync", "status"]
-                }
-              },
               "status": "OK",
               "code": 200,
               "body": "{\n  \"gmail_last_sync\": \"2024-11-08T10:30:00\",\n  \"gmail_status\": \"completed\",\n  \"gcal_last_sync\": \"2024-11-08T10:30:00\",\n  \"gcal_status\": \"completed\",\n  \"gdrive_last_sync\": \"2024-11-08T10:25:00\",\n  \"gdrive_status\": \"completed\"\n}"
@@ -368,26 +429,14 @@
               "host": ["{{base_url}}{{api_prefix}}"],
               "path": ["sync", "trigger"]
             },
-            "description": "Trigger a manual sync for all Google services."
+            "description": "Trigger a manual sync for all Google services. Runs as background Celery task."
           },
           "response": [
             {
               "name": "Sync Triggered Response",
-              "originalRequest": {
-                "method": "POST",
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"service\": \"all\"\n}"
-                },
-                "url": {
-                  "raw": "{{base_url}}{{api_prefix}}/sync/trigger",
-                  "host": ["{{base_url}}{{api_prefix}}"],
-                  "path": ["sync", "trigger"]
-                }
-              },
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"status\": \"sync_triggered\",\n  \"service\": \"all\",\n  \"message\": \"Sync triggered for all services. Check /sync/status for progress.\"\n}"
+              "body": "{\n  \"status\": \"sync_triggered\",\n  \"service\": \"all\",\n  \"task_ids\": {\"all\": \"task-abc123\"},\n  \"message\": \"Sync triggered for all. Check /sync/status for progress.\"\n}"
             }
           ]
         },
@@ -463,7 +512,58 @@
       ]
     },
     {
+      "name": "User Settings",
+      "description": "Manage user preferences and autosync settings.",
+      "item": [
+        {
+          "name": "Get User Settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/users/me/settings",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["users", "me", "settings"]
+            },
+            "description": "Get the current user's settings including autosync preferences."
+          },
+          "response": [
+            {
+              "name": "Settings Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"autosync_enabled\": true,\n  \"sync_interval_minutes\": 15,\n  \"last_sync_at\": \"2024-11-08T10:30:00\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update User Settings",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"autosync_enabled\": true,\n  \"sync_interval_minutes\": 30\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/users/me/settings",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["users", "me", "settings"]
+            },
+            "description": "Update user settings. Partial updates supported. sync_interval_minutes must be 15, 30, or 60."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Authentication",
+      "description": "Google OAuth authentication endpoints.",
       "item": [
         {
           "name": "Get Auth Status",
@@ -475,36 +575,26 @@
               "host": ["{{base_url}}{{api_prefix}}"],
               "path": ["auth", "status"]
             },
-            "description": "Check if the current user is authenticated with Google."
+            "description": "Check authentication status. Shows whether in mock mode or real API mode, and connected services."
           },
           "response": [
             {
-              "name": "Unauthenticated",
-              "originalRequest": {
-                "method": "GET",
-                "url": {
-                  "raw": "{{base_url}}{{api_prefix}}/auth/status",
-                  "host": ["{{base_url}}{{api_prefix}}"],
-                  "path": ["auth", "status"]
-                }
-              },
+              "name": "Mock Mode",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"authenticated\": false,\n  \"email\": null\n}"
+              "body": "{\n  \"mode\": \"mock\",\n  \"authenticated\": true,\n  \"user_id\": \"00000000-0000-0000-0000-000000000001\",\n  \"email\": \"demo@example.com\",\n  \"services\": {\n    \"gmail\": \"mock\",\n    \"calendar\": \"mock\",\n    \"drive\": \"mock\"\n  }\n}"
             },
             {
-              "name": "Authenticated",
-              "originalRequest": {
-                "method": "GET",
-                "url": {
-                  "raw": "{{base_url}}{{api_prefix}}/auth/status",
-                  "host": ["{{base_url}}{{api_prefix}}"],
-                  "path": ["auth", "status"]
-                }
-              },
+              "name": "Real Mode - Authenticated",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"authenticated\": true,\n  \"email\": \"user@example.com\"\n}"
+              "body": "{\n  \"mode\": \"real\",\n  \"authenticated\": true,\n  \"user_id\": \"user-uuid\",\n  \"email\": \"user@example.com\",\n  \"services\": {\n    \"gmail\": \"connected\",\n    \"calendar\": \"connected\",\n    \"drive\": \"connected\"\n  }\n}"
+            },
+            {
+              "name": "Real Mode - Not Authenticated",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"mode\": \"real\",\n  \"authenticated\": false,\n  \"message\": \"Not logged in. Visit /api/v1/auth/login to authenticate.\"\n}"
             }
           ]
         },
@@ -518,9 +608,30 @@
               "host": ["{{base_url}}{{api_prefix}}"],
               "path": ["auth", "login"]
             },
-            "description": "Redirect to Google OAuth consent screen. This endpoint redirects to Google for authentication."
+            "description": "Redirect to Google OAuth consent screen. Only works when USE_MOCK_GOOGLE=false."
           },
           "response": []
+        },
+        {
+          "name": "Demo Login (Mock Mode)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/auth/demo-login",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["auth", "demo-login"]
+            },
+            "description": "Login as demo user in mock mode. Only works when USE_MOCK_GOOGLE=true. Sets session cookie for subsequent authenticated requests."
+          },
+          "response": [
+            {
+              "name": "Demo Login Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"logged_in\",\n  \"mode\": \"mock\",\n  \"user_id\": \"00000000-0000-0000-0000-000000000001\",\n  \"email\": \"demo@example.com\",\n  \"message\": \"Logged in as demo user. Use seeded mock data for testing.\"\n}"
+            }
+          ]
         },
         {
           "name": "OAuth Callback",
@@ -542,7 +653,7 @@
                 }
               ]
             },
-            "description": "OAuth callback endpoint. Google redirects here after user consent."
+            "description": "OAuth callback endpoint. Google redirects here after user consent. Sets session cookie on success."
           },
           "response": []
         },
@@ -556,58 +667,103 @@
               "host": ["{{base_url}}{{api_prefix}}"],
               "path": ["auth", "logout"]
             },
-            "description": "Log out the current user and clear session."
+            "description": "Log out the current user, revoke tokens, and clear session."
           },
-          "response": []
+          "response": [
+            {
+              "name": "Logout Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"logged_out\",\n  \"message\": \"Google tokens revoked and session cleared\"\n}"
+            }
+          ]
         }
       ]
     },
     {
-      "name": "Test Endpoints",
+      "name": "Test & Debug",
+      "description": "Endpoints for testing and debugging individual services.",
       "item": [
         {
-          "name": "Test Intent Classification",
+          "name": "Test Gmail API",
           "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"query\": \"Cancel my Turkish Airlines flight\"\n}"
-            },
+            "method": "GET",
+            "header": [],
             "url": {
-              "raw": "{{base_url}}{{api_prefix}}/test/classify",
+              "raw": "{{base_url}}{{api_prefix}}/test/gmail?q=budget&limit=10",
               "host": ["{{base_url}}{{api_prefix}}"],
-              "path": ["test", "classify"]
+              "path": ["test", "gmail"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "budget",
+                  "description": "Optional search query"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Max results"
+                }
+              ]
             },
-            "description": "Test the intent classifier without executing the query."
+            "description": "Test Gmail search directly without going through the orchestrator."
           },
           "response": []
         },
         {
-          "name": "Test Embedding",
+          "name": "Test Calendar API",
           "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"text\": \"Turkish Airlines flight booking confirmation\"\n}"
-            },
+            "method": "GET",
+            "header": [],
             "url": {
-              "raw": "{{base_url}}{{api_prefix}}/test/embed",
+              "raw": "{{base_url}}{{api_prefix}}/test/calendar?time_range=next_week&limit=10",
               "host": ["{{base_url}}{{api_prefix}}"],
-              "path": ["test", "embed"]
+              "path": ["test", "calendar"],
+              "query": [
+                {
+                  "key": "time_range",
+                  "value": "next_week",
+                  "description": "Time range: today, tomorrow, next_week"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Max results"
+                }
+              ]
             },
-            "description": "Test the embedding service with sample text."
+            "description": "Test Calendar search directly without going through the orchestrator."
+          },
+          "response": []
+        },
+        {
+          "name": "Test Drive API",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/test/drive?name=budget&mime_type=application/pdf&limit=10",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["test", "drive"],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "budget",
+                  "description": "Optional file name filter"
+                },
+                {
+                  "key": "mime_type",
+                  "value": "application/pdf",
+                  "description": "Optional MIME type filter"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Max results"
+                }
+              ]
+            },
+            "description": "Test Drive search directly without going through the orchestrator."
           },
           "response": []
         }

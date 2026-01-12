@@ -299,7 +299,7 @@ class CalendarService:
         Returns:
             Created event data
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gcal_mock and self.service:
             try:
                 event_body = {
                     "summary": title,
@@ -365,7 +365,7 @@ class CalendarService:
         Returns:
             Updated event data
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gcal_mock and self.service:
             try:
                 # Get existing event
                 event = self.service.events().get(
@@ -418,7 +418,7 @@ class CalendarService:
             user_id: The user's ID
             event_id: The event ID
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gcal_mock and self.service:
             try:
                 self.service.events().delete(
                     calendarId="primary",

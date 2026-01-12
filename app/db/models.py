@@ -73,8 +73,15 @@ class GmailCache(Base):
     is_read = Column(Boolean, default=False)
     has_attachments = Column(Boolean, default=False)
     synced_at = Column(DateTime, default=datetime.utcnow)
-    # Full-text search vector (generated column for BM25)
-    search_vector = Column(TSVECTOR)
+    # Full-text search vector (PostgreSQL generated column for BM25)
+    # Automatically computed from subject, sender, and body_preview
+    search_vector = Column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('english', coalesce(subject, '') || ' ' || coalesce(sender, '') || ' ' || coalesce(body_preview, ''))",
+            persisted=True
+        )
+    )
 
     __table_args__ = (
         Index(
@@ -109,8 +116,15 @@ class GcalCache(Base):
     status = Column(String(50))  # confirmed, tentative, cancelled
     embedding = Column(Vector(1536))
     synced_at = Column(DateTime, default=datetime.utcnow)
-    # Full-text search vector (generated column for BM25)
-    search_vector = Column(TSVECTOR)
+    # Full-text search vector (PostgreSQL generated column for BM25)
+    # Automatically computed from title, description, and location
+    search_vector = Column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '') || ' ' || coalesce(location, ''))",
+            persisted=True
+        )
+    )
 
     __table_args__ = (
         Index(
@@ -144,8 +158,15 @@ class GdriveCache(Base):
     created_at = Column(DateTime)
     modified_at = Column(DateTime)
     synced_at = Column(DateTime, default=datetime.utcnow)
-    # Full-text search vector (generated column for BM25)
-    search_vector = Column(TSVECTOR)
+    # Full-text search vector (PostgreSQL generated column for BM25)
+    # Automatically computed from name and content_preview
+    search_vector = Column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('english', coalesce(name, '') || ' ' || coalesce(content_preview, ''))",
+            persisted=True
+        )
+    )
 
     __table_args__ = (
         Index(

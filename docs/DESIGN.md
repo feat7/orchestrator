@@ -128,13 +128,19 @@ erDiagram
         text google_access_token
         text google_refresh_token
         timestamp token_expires_at
+        boolean autosync_enabled
+        integer sync_interval_minutes
+        timestamp last_sync_at
         timestamp created_at
+        timestamp updated_at
     }
 
     conversations {
         uuid id PK
         uuid user_id FK
+        string title
         timestamp created_at
+        timestamp updated_at
     }
 
     messages {
@@ -156,9 +162,14 @@ erDiagram
         string sender
         jsonb recipients
         text body_preview
+        text body_full
         vector embedding
+        tsvector search_vector
         timestamp received_at
         jsonb labels
+        boolean is_read
+        boolean has_attachments
+        timestamp synced_at
     }
 
     gcal_cache {
@@ -172,7 +183,11 @@ erDiagram
         timestamp end_time
         jsonb attendees
         text location
+        text meeting_link
+        string status
         vector embedding
+        tsvector search_vector
+        timestamp synced_at
     }
 
     gdrive_cache {
@@ -183,8 +198,14 @@ erDiagram
         string mime_type
         text content_preview
         string parent_folder
+        text web_link
+        jsonb owners
+        jsonb shared_with
         vector embedding
+        tsvector search_vector
+        timestamp created_at
         timestamp modified_at
+        timestamp synced_at
     }
 
     sync_status {
@@ -194,6 +215,7 @@ erDiagram
         timestamp last_sync_at
         text last_sync_token
         string status
+        text error_message
     }
 ```
 
