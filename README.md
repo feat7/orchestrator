@@ -136,13 +136,61 @@ See [Design Documentation](docs/DESIGN.md) for detailed architecture and scaling
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/v1/query` | Process natural language query |
+| POST | `/api/v1/intent` | Classify intent only (no execution) |
 | POST | `/api/v1/query/stream` | Streaming query response (SSE) |
 | GET | `/api/v1/health` | Health check |
 | POST | `/api/v1/sync/trigger` | Trigger data sync |
 | GET | `/api/v1/sync/status` | Get sync status |
 | GET | `/api/v1/metrics/precision` | Search quality benchmark |
 
-See [API Documentation](docs/API.md) for details.
+### Example: Intent Classification
+
+```bash
+curl -X POST http://localhost:8000/api/v1/intent \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Cancel my Turkish Airlines flight"}'
+```
+
+Response:
+```json
+{
+  "query": "Cancel my Turkish Airlines flight",
+  "intent": {
+    "services": ["gmail", "gcal"],
+    "operation": "action",
+    "steps": [
+      {"step": "search_gmail", "params": {"search_query": "Turkish Airlines flight booking"}},
+      {"step": "search_calendar", "params": {"search_query": "Turkish Airlines flight"}},
+      {"step": "draft_email", "params": {"to": "support@turkishairlines.com", "subject": "Flight Cancellation Request"}}
+    ],
+    "confidence": 0.9
+  },
+  "latency_ms": 1850
+}
+```
+
+### Example: Full Query Execution
+
+```bash
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What important things to do this week?"}'
+```
+
+Response:
+```json
+{
+  "response": "Here's what's important this week:\n\n- Monday at 9:00 AM: Daily Standup\n- Monday at 11:00 AM: 1:1 with Manager\n- Tuesday at 10:00 AM: Acme Corp Partnership Meeting\n\nNo urgent emails found for this week.",
+  "actions_taken": [
+    {"step": "search_calendar", "success": true, "data": {"results": [...]}},
+    {"step": "search_gmail", "success": true, "data": {"results": [...]}}
+  ],
+  "intent": {"services": ["gcal", "gmail"], "operation": "search", ...},
+  "latency_ms": 3200
+}
+```
+
+See [API Documentation](docs/API.md) for details and [Sample Queries](docs/sample_queries.md) for more examples.
 
 ## Configuration
 

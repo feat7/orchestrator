@@ -588,6 +588,52 @@ async def _load_conversation_context_from_db(
         return []
 
 
+@router.post("/intent")
+async def classify_intent(
+    request: QueryRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    cache: CacheService = Depends(get_cache_service),
+):
+    """Classify the intent of a natural language query without executing it.
+
+    This endpoint is useful for debugging and testing the intent classifier.
+    It returns the parsed intent including services, steps, and parameters
+    without actually executing the query.
+
+    Args:
+        request: The query request with user's natural language input
+        current_user: The authenticated user
+        cache: Cache service for conversation context
+
+    Returns:
+        The parsed intent as JSON
+    """
+    from app.core.intent import IntentClassifier
+    from app.core.llm import get_llm
+
+    start_time = time.time()
+
+    # Get conversation context if provided
+    conversation_context = []
+    if request.conversation_id:
+        conversation_context = await cache.get_conversation_context(
+            str(request.conversation_id)
+        )
+
+    # Classify intent
+    llm = get_llm()
+    classifier = IntentClassifier(llm)
+    intent = await classifier.classify(request.query, conversation_context)
+
+    latency_ms = int((time.time() - start_time) * 1000)
+
+    return {
+        "query": request.query,
+        "intent": intent.model_dump(),
+        "latency_ms": latency_ms,
+    }
+
+
 @router.post("/query/stream")
 async def process_query_stream(
     request: QueryRequest,

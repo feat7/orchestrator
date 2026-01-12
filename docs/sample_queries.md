@@ -2,6 +2,35 @@
 
 This document contains 10+ sample queries with expected outputs, including edge cases.
 
+All examples use the `/api/v1/intent` endpoint for intent classification and `/api/v1/query` for full execution.
+
+---
+
+## API Request/Response Examples
+
+### Using the Intent Endpoint
+
+```bash
+# Login first (for demo mode)
+curl -X POST http://localhost:8000/api/v1/auth/demo-login -c cookies.txt
+
+# Classify intent only
+curl -X POST http://localhost:8000/api/v1/intent \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"query": "What important things to do this week?"}'
+```
+
+### Using the Query Endpoint
+
+```bash
+# Execute full query
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"query": "What important things to do this week?"}'
+```
+
 ---
 
 ## 1. Single Service: Calendar Search
@@ -11,24 +40,44 @@ This document contains 10+ sample queries with expected outputs, including edge 
 What's on my calendar next week?
 ```
 
-**Expected Intent:**
+**API Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/intent \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"query": "What'\''s on my calendar next week?"}'
+```
+
+**Intent Response:**
 ```json
 {
-  "services": ["gcal"],
-  "operation": "search",
-  "entities": {"time_range": "next_week"},
-  "steps": ["search_calendar"],
-  "confidence": 0.95
+  "query": "What's on my calendar next week?",
+  "intent": {
+    "services": ["gcal"],
+    "operation": "search",
+    "steps": [
+      {
+        "step": "search_calendar",
+        "params": {
+          "search_query": "",
+          "start_after": "2026-01-19T00:00:00",
+          "start_before": "2026-01-25T23:59:59"
+        }
+      }
+    ],
+    "confidence": 0.95
+  },
+  "latency_ms": 1523
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
 Here's what's on your calendar next week:
-- Monday 9:00 AM: Daily Standup (30 min)
-- Tuesday 2:00 PM: Acme Corp Quarterly Review with sarah@acme-corp.com
-- Thursday 2:00 PM: 1:1 with Sarah
-- Friday 12:00 PM: Team Lunch at Pasta Paradise
+
+- Monday, January 19 at 10:00 AM: Sprint Planning - Sprint 24
+- Wednesday, January 22 at 2:00 PM: All Hands Meeting
+- Friday, January 24 at 10:00 AM: TechCorp Enterprise Kickoff
 
 Would you like more details about any of these events?
 ```
@@ -39,28 +88,39 @@ Would you like more details about any of these events?
 
 **Query:**
 ```
-Find emails from sarah@acme-corp.com about the budget
+Find emails from sarah@company.com about the budget
 ```
 
-**Expected Intent:**
+**Intent Response:**
 ```json
 {
-  "services": ["gmail"],
-  "operation": "search",
-  "entities": {"sender": "sarah@acme-corp.com", "topic": "budget"},
-  "steps": ["search_gmail"],
-  "confidence": 0.95
+  "query": "Find emails from sarah@company.com about the budget",
+  "intent": {
+    "services": ["gmail"],
+    "operation": "search",
+    "steps": [
+      {
+        "step": "search_gmail",
+        "params": {
+          "search_query": "budget",
+          "sender": "sarah@company.com"
+        }
+      }
+    ],
+    "confidence": 0.95
+  },
+  "latency_ms": 1245
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
-I found 1 email from sarah@acme-corp.com about the budget:
+I found one email from sarah@company.com about the budget:
 
-- "Acme Corp Q4 Budget Review" (2 days ago)
-  Preview: Hi team, please review the attached Q4 budget proposal...
+- Subject: "Re: Q4 Budget Discussion"
+- Date: Friday, January 10, 2026 at 2:30 PM
 
-Would you like me to show the full email?
+Would you like me to open it or provide a summary?
 ```
 
 ---
@@ -72,26 +132,38 @@ Would you like me to show the full email?
 Show me PDFs in Drive from last month
 ```
 
-**Expected Intent:**
+**Intent Response:**
 ```json
 {
-  "services": ["gdrive"],
-  "operation": "search",
-  "entities": {"mime_type": "pdf", "time_range": "last_month"},
-  "steps": ["search_drive"],
-  "confidence": 0.9
+  "query": "Show me PDFs in Drive from last month",
+  "intent": {
+    "services": ["gdrive"],
+    "operation": "search",
+    "steps": [
+      {
+        "step": "search_drive",
+        "params": {
+          "search_query": "",
+          "modified_after": "2025-12-13",
+          "mime_type": "application/pdf"
+        }
+      }
+    ],
+    "confidence": 0.9
+  },
+  "latency_ms": 1102
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
-I found 2 PDF files from last month:
+I found 5 PDF files in your Google Drive from last month:
 
-- Q4_Budget_Proposal.pdf (modified 3 days ago)
-  In folder: Acme Corp
-
-- Service_Agreement_2024.pdf (modified 60 days ago)
-  In folder: Contracts
+- TechCorp_Enterprise_Agreement.pdf - modified January 11 at 2:30 PM
+- API_Documentation_v2.5.pdf - modified January 10 at 3:00 PM
+- Q4_Budget_Proposal.pdf - modified January 10 at 11:00 AM
+- Q3_Earnings_Report.pdf - modified January 4 at 10:00 AM
+- Product_Roadmap_2025.pdf - modified December 29 at 10:00 AM
 
 Would you like me to open or share any of these files?
 ```
@@ -105,31 +177,54 @@ Would you like me to open or share any of these files?
 Cancel my Turkish Airlines flight
 ```
 
-**Expected Intent:**
+**Intent Response:**
 ```json
 {
-  "services": ["gmail", "gcal"],
-  "operation": "update",
-  "entities": {"airline": "Turkish Airlines", "action": "cancel"},
-  "steps": ["search_gmail", "search_calendar", "draft_email"],
-  "confidence": 0.9
+  "query": "Cancel my Turkish Airlines flight",
+  "intent": {
+    "services": ["gmail", "gcal"],
+    "operation": "action",
+    "steps": [
+      {
+        "step": "search_gmail",
+        "params": {
+          "search_query": "Turkish Airlines flight booking confirmation"
+        }
+      },
+      {
+        "step": "search_calendar",
+        "params": {
+          "search_query": "Turkish Airlines flight"
+        }
+      },
+      {
+        "step": "draft_email",
+        "params": {
+          "to": "support@turkishairlines.com",
+          "subject": "Flight Cancellation Request",
+          "body": "I would like to cancel my upcoming flight."
+        },
+        "depends_on": [0]
+      }
+    ],
+    "confidence": 0.9
+  },
+  "latency_ms": 2156
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
-I found your Turkish Airlines booking:
+I've drafted an email for you and saved it to your Gmail Drafts:
 
-- Email: "Turkish Airlines Flight Confirmation - TK1234"
-  From: reservations@turkishairlines.com (20 days ago)
-  Booking ref: ABC123
+**To:** support@turkishairlines.com
+**Subject:** Flight Cancellation Request
 
-- Calendar: "Istanbul → NYC Flight TK1234"
-  Date: Nov 5, 2024 at 10:30 AM
+I found your booking:
+- Email: "Turkish Airlines Flight Confirmation - TK1234" (20 days ago)
+- Calendar: "Istanbul - NYC Flight TK1234" on February 11
 
-I've drafted a cancellation email to support@turkishairlines.com with your booking reference.
-
-Would you like me to send it?
+Would you like me to send the cancellation email?
 ```
 
 ---
@@ -141,33 +236,58 @@ Would you like me to send it?
 Prepare for tomorrow's meeting with Acme Corp
 ```
 
-**Expected Intent:**
+**Intent Response:**
 ```json
 {
-  "services": ["gcal", "gmail", "gdrive"],
-  "operation": "search",
-  "entities": {"company": "Acme Corp", "time": "tomorrow", "event_type": "meeting"},
-  "steps": ["search_calendar", "search_gmail", "search_drive"],
-  "confidence": 0.85
+  "query": "Prepare for tomorrow's meeting with Acme Corp",
+  "intent": {
+    "services": ["gcal", "gmail", "gdrive"],
+    "operation": "search",
+    "steps": [
+      {
+        "step": "search_calendar",
+        "params": {
+          "search_query": "Acme Corp",
+          "start_after": "2026-01-13T00:00:00",
+          "start_before": "2026-01-14T00:00:00"
+        }
+      },
+      {
+        "step": "search_gmail",
+        "params": {
+          "search_query": "Acme Corp"
+        }
+      },
+      {
+        "step": "search_drive",
+        "params": {
+          "search_query": "Acme Corp"
+        }
+      }
+    ],
+    "confidence": 0.9
+  },
+  "latency_ms": 1834
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
-Here's everything for your Acme Corp meeting tomorrow:
+Here's what I found to help you prepare for tomorrow's meeting with Acme Corp:
 
 **Meeting Details:**
-- Acme Corp Quarterly Review
-- Tomorrow at 2:00 PM (1 hour)
-- Location: Conference Room A
-- Attendees: sarah@acme-corp.com, john@company.com
+- Acme Corp Partnership Meeting
+- Tuesday, January 13 at 10:00 AM (Conference Room A)
+- Attendees: sarah@acme-corp.com, pm@company.com, sales@company.com
 
 **Related Emails:**
+- "Prep for tomorrow's Acme Corp meeting" from pm@company.com (today)
 - "Acme Corp Q4 Budget Review" from sarah@acme-corp.com (2 days ago)
 
 **Related Files:**
-- Q4_Budget_Proposal.pdf
 - Acme_Corp_Meeting_Deck.pptx
+- Acme_Corp_Q4_Projections.xlsx
+- Q4_Budget_Proposal.pdf
 
 Would you like me to open any of these documents?
 ```
@@ -181,18 +301,44 @@ Would you like me to open any of these documents?
 Find events next week that conflict with my out-of-office doc
 ```
 
-**Expected Intent:**
+**API Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/intent \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"query": "Find events next week that conflict with my out-of-office doc"}'
+```
+
+**Intent Response:**
 ```json
 {
-  "services": ["gcal", "gdrive"],
-  "operation": "search",
-  "entities": {"time_range": "next_week", "document_type": "out-of-office"},
-  "steps": ["search_drive", "search_calendar"],
-  "confidence": 0.8
+  "query": "Find events next week that conflict with my out-of-office doc",
+  "intent": {
+    "services": ["gcal", "gdrive"],
+    "operation": "search",
+    "steps": [
+      {
+        "step": "search_drive",
+        "params": {
+          "search_query": "out-of-office OOO vacation"
+        }
+      },
+      {
+        "step": "search_calendar",
+        "params": {
+          "search_query": "",
+          "start_after": "2026-01-19T00:00:00",
+          "start_before": "2026-01-25T23:59:59"
+        }
+      }
+    ],
+    "confidence": 0.8
+  },
+  "latency_ms": 1756
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
 I found your out-of-office schedule and checked for conflicts:
 
@@ -215,18 +361,36 @@ Would you like me to update these events or notify attendees?
 Move the meeting with John
 ```
 
-**Expected Intent:**
+**API Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/intent \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"query": "Move the meeting with John"}'
+```
+
+**Intent Response:**
 ```json
 {
-  "services": ["gcal"],
-  "operation": "update",
-  "entities": {"attendee": "John", "action": "reschedule"},
-  "steps": ["search_calendar"],
-  "confidence": 0.6
+  "query": "Move the meeting with John",
+  "intent": {
+    "services": ["gcal"],
+    "operation": "update",
+    "steps": [
+      {
+        "step": "search_calendar",
+        "params": {
+          "search_query": "John meeting"
+        }
+      }
+    ],
+    "confidence": 0.6
+  },
+  "latency_ms": 1234
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
 I found multiple events that might be "the meeting with John":
 
@@ -252,18 +416,45 @@ Find emails from sarah@company.com
 That email about the proposal
 ```
 
-**Expected Intent:**
+**API Request (first query):**
+```bash
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"query": "Find emails from sarah@company.com"}'
+```
+
+**API Request (follow-up with conversation context):**
+```bash
+curl -X POST http://localhost:8000/api/v1/intent \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"query": "That email about the proposal", "conversation_id": "conv_123"}'
+```
+
+**Intent Response:**
 ```json
 {
-  "services": ["gmail"],
-  "operation": "search",
-  "entities": {"sender": "sarah@company.com", "topic": "proposal"},
-  "steps": ["get_email"],
-  "confidence": 0.75
+  "query": "That email about the proposal",
+  "intent": {
+    "services": ["gmail"],
+    "operation": "search",
+    "steps": [
+      {
+        "step": "search_gmail",
+        "params": {
+          "search_query": "proposal",
+          "sender": "sarah@company.com"
+        }
+      }
+    ],
+    "confidence": 0.75
+  },
+  "latency_ms": 1102
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
 I couldn't find an email from sarah@company.com specifically about a proposal.
 
@@ -282,20 +473,40 @@ Is this what you were looking for, or would you like me to search more broadly?
 What meetings do I have next Tuesday?
 ```
 
-**Expected Intent:**
+**API Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/intent \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"query": "What meetings do I have next Tuesday?"}'
+```
+
+**Intent Response:**
 ```json
 {
-  "services": ["gcal"],
-  "operation": "search",
-  "entities": {"day": "next_tuesday", "event_type": "meeting"},
-  "steps": ["search_calendar"],
-  "confidence": 0.95
+  "query": "What meetings do I have next Tuesday?",
+  "intent": {
+    "services": ["gcal"],
+    "operation": "search",
+    "steps": [
+      {
+        "step": "search_calendar",
+        "params": {
+          "search_query": "meeting",
+          "start_after": "2026-01-20T00:00:00",
+          "start_before": "2026-01-20T23:59:59"
+        }
+      }
+    ],
+    "confidence": 0.95
+  },
+  "latency_ms": 1089
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
-You have 1 meeting scheduled for next Tuesday (Nov 12):
+You have 1 meeting scheduled for next Tuesday (Jan 20):
 
 - 2:00 PM: Client Call - Project Alpha Demo (1 hour)
   Attendees: client@bigcorp.com, john@company.com
@@ -313,18 +524,36 @@ Would you like me to add anything to your schedule or send reminders?
 Find emails about the Jupiter project
 ```
 
-**Expected Intent:**
+**API Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/intent \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"query": "Find emails about the Jupiter project"}'
+```
+
+**Intent Response:**
 ```json
 {
-  "services": ["gmail"],
-  "operation": "search",
-  "entities": {"topic": "Jupiter project"},
-  "steps": ["search_gmail"],
-  "confidence": 0.9
+  "query": "Find emails about the Jupiter project",
+  "intent": {
+    "services": ["gmail"],
+    "operation": "search",
+    "steps": [
+      {
+        "step": "search_gmail",
+        "params": {
+          "search_query": "Jupiter project"
+        }
+      }
+    ],
+    "confidence": 0.9
+  },
+  "latency_ms": 978
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
 I couldn't find any emails about "Jupiter project" in your inbox.
 
@@ -345,23 +574,47 @@ Would you like me to search Drive or Calendar for "Jupiter project" instead?
 Draft an email to john@company.com about the meeting and add it to my calendar for Friday at 2pm
 ```
 
-**Expected Intent:**
+**API Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/intent \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"query": "Draft an email to john@company.com about the meeting and add it to my calendar for Friday at 2pm"}'
+```
+
+**Intent Response:**
 ```json
 {
-  "services": ["gmail", "gcal"],
-  "operation": "create",
-  "entities": {
-    "recipient": "john@company.com",
-    "topic": "meeting",
-    "day": "Friday",
-    "time": "2pm"
+  "query": "Draft an email to john@company.com about the meeting and add it to my calendar for Friday at 2pm",
+  "intent": {
+    "services": ["gmail", "gcal"],
+    "operation": "create",
+    "steps": [
+      {
+        "step": "draft_email",
+        "params": {
+          "to": "john@company.com",
+          "subject": "Meeting Discussion",
+          "body": "Hi John,\n\nI wanted to discuss the upcoming meeting.\n\nBest regards"
+        }
+      },
+      {
+        "step": "create_event",
+        "params": {
+          "title": "Meeting with John",
+          "start_time": "2026-01-16T14:00:00",
+          "end_time": "2026-01-16T15:00:00",
+          "attendees": ["john@company.com"]
+        }
+      }
+    ],
+    "confidence": 0.85
   },
-  "steps": ["draft_email", "create_event"],
-  "confidence": 0.85
+  "latency_ms": 1567
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
 I've prepared both items for you:
 
@@ -387,18 +640,44 @@ Would you like me to send the email or make any changes to the event?
 Share the contract file with external@competitor.com
 ```
 
-**Expected Intent:**
+**API Request:**
+```bash
+curl -X POST http://localhost:8000/api/v1/intent \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"query": "Share the contract file with external@competitor.com"}'
+```
+
+**Intent Response:**
 ```json
 {
-  "services": ["gdrive"],
-  "operation": "update",
-  "entities": {"file_type": "contract", "share_with": "external@competitor.com"},
-  "steps": ["search_drive", "share_file"],
-  "confidence": 0.8
+  "query": "Share the contract file with external@competitor.com",
+  "intent": {
+    "services": ["gdrive"],
+    "operation": "update",
+    "steps": [
+      {
+        "step": "search_drive",
+        "params": {
+          "search_query": "contract"
+        }
+      },
+      {
+        "step": "share_file",
+        "params": {
+          "share_with": "external@competitor.com",
+          "permission": "reader"
+        },
+        "depends_on": [0]
+      }
+    ],
+    "confidence": 0.8
+  },
+  "latency_ms": 1234
 }
 ```
 
-**Expected Response:**
+**Full Query Response:**
 ```
 I found the file "Service_Agreement_2024.pdf" but I need to flag a concern:
 

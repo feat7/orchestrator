@@ -156,6 +156,117 @@
           "response": []
         },
         {
+          "name": "Classify Intent Only",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Cancel my Turkish Airlines flight\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/intent",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["intent"]
+            },
+            "description": "Classify the intent of a natural language query without executing it. Useful for debugging, testing intent classification accuracy, and understanding how queries are parsed.\n\nReturns:\n- services: Which Google services will be queried\n- operation: Type of operation (search, action, create, update)\n- steps: Execution plan with parameters\n- confidence: Classification confidence score"
+          },
+          "response": [
+            {
+              "name": "Intent - Multi-Service Action",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"query\": \"Cancel my Turkish Airlines flight\",\n  \"intent\": {\n    \"services\": [\"gmail\", \"gcal\"],\n    \"operation\": \"action\",\n    \"steps\": [\n      {\n        \"step\": \"search_gmail\",\n        \"params\": {\n          \"search_query\": \"Turkish Airlines flight booking confirmation\"\n        }\n      },\n      {\n        \"step\": \"search_calendar\",\n        \"params\": {\n          \"search_query\": \"Turkish Airlines flight\"\n        }\n      },\n      {\n        \"step\": \"draft_email\",\n        \"params\": {\n          \"to\": \"support@turkishairlines.com\",\n          \"subject\": \"Flight Cancellation Request\",\n          \"body\": \"I would like to cancel my upcoming flight.\"\n        },\n        \"depends_on\": [0]\n      }\n    ],\n    \"confidence\": 0.9\n  },\n  \"latency_ms\": 1850\n}"
+            },
+            {
+              "name": "Intent - Calendar Search",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"query\": \"What's on my calendar next week?\",\n  \"intent\": {\n    \"services\": [\"gcal\"],\n    \"operation\": \"search\",\n    \"steps\": [\n      {\n        \"step\": \"search_calendar\",\n        \"params\": {\n          \"search_query\": \"\",\n          \"start_after\": \"2026-01-19T00:00:00\",\n          \"start_before\": \"2026-01-25T23:59:59\"\n        }\n      }\n    ],\n    \"confidence\": 0.95\n  },\n  \"latency_ms\": 1234\n}"
+            },
+            {
+              "name": "Intent - Meeting Prep (3 services)",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"query\": \"Prepare for tomorrow's meeting with Acme Corp\",\n  \"intent\": {\n    \"services\": [\"gcal\", \"gmail\", \"gdrive\"],\n    \"operation\": \"search\",\n    \"steps\": [\n      {\n        \"step\": \"search_calendar\",\n        \"params\": {\n          \"search_query\": \"Acme Corp\",\n          \"start_after\": \"2026-01-13T00:00:00\",\n          \"start_before\": \"2026-01-14T00:00:00\"\n        }\n      },\n      {\n        \"step\": \"search_gmail\",\n        \"params\": {\n          \"search_query\": \"Acme Corp\"\n        }\n      },\n      {\n        \"step\": \"search_drive\",\n        \"params\": {\n          \"search_query\": \"Acme Corp\"\n        }\n      }\n    ],\n    \"confidence\": 0.9\n  },\n  \"latency_ms\": 1567\n}"
+            }
+          ]
+        },
+        {
+          "name": "Classify Intent - Calendar Query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"What's on my calendar next week?\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/intent",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["intent"]
+            },
+            "description": "Classify intent for a calendar search query."
+          },
+          "response": []
+        },
+        {
+          "name": "Classify Intent - Meeting Prep",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Prepare for tomorrow's meeting with Acme Corp\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/intent",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["intent"]
+            },
+            "description": "Classify intent for meeting preparation - searches Calendar, Gmail, and Drive."
+          },
+          "response": []
+        },
+        {
+          "name": "Classify Intent - Email Search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Find emails from sarah@company.com about the budget\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/intent",
+              "host": ["{{base_url}}{{api_prefix}}"],
+              "path": ["intent"]
+            },
+            "description": "Classify intent for email search with sender and topic filters."
+          },
+          "response": []
+        },
+        {
           "name": "Query - Search Gmail",
           "request": {
             "method": "POST",
