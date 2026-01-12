@@ -98,10 +98,17 @@ class CalendarService:
                     GcalCache.start_time >= today_start,
                     GcalCache.start_time < today_end,
                 )
-            if filters.get("date_from"):
-                query = query.where(GcalCache.start_time >= filters["date_from"])
-            if filters.get("date_to"):
-                query = query.where(GcalCache.end_time <= filters["date_to"])
+            # Support both date_from/date_to and start_after/start_before
+            date_from = filters.get("date_from") or filters.get("start_after")
+            date_to = filters.get("date_to") or filters.get("start_before")
+            if date_from:
+                if isinstance(date_from, str):
+                    date_from = datetime.fromisoformat(date_from.replace("Z", "+00:00"))
+                query = query.where(GcalCache.start_time >= date_from)
+            if date_to:
+                if isinstance(date_to, str):
+                    date_to = datetime.fromisoformat(date_to.replace("Z", "+00:00"))
+                query = query.where(GcalCache.start_time <= date_to)
 
         # Order by similarity (descending) and limit
         query = query.order_by(distance_expr).limit(limit * 2)
@@ -202,10 +209,17 @@ class CalendarService:
                     GcalCache.start_time >= today_start,
                     GcalCache.start_time < today_end,
                 )
-            if filters.get("date_from"):
-                query_stmt = query_stmt.where(GcalCache.start_time >= filters["date_from"])
-            if filters.get("date_to"):
-                query_stmt = query_stmt.where(GcalCache.end_time <= filters["date_to"])
+            # Support both date_from/date_to and start_after/start_before
+            date_from = filters.get("date_from") or filters.get("start_after")
+            date_to = filters.get("date_to") or filters.get("start_before")
+            if date_from:
+                if isinstance(date_from, str):
+                    date_from = datetime.fromisoformat(date_from.replace("Z", "+00:00"))
+                query_stmt = query_stmt.where(GcalCache.start_time >= date_from)
+            if date_to:
+                if isinstance(date_to, str):
+                    date_to = datetime.fromisoformat(date_to.replace("Z", "+00:00"))
+                query_stmt = query_stmt.where(GcalCache.start_time <= date_to)
 
         query_stmt = (
             query_stmt
@@ -299,7 +313,7 @@ class CalendarService:
         Returns:
             Created event data
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gcal_mock and self.service:
             try:
                 event_body = {
                     "summary": title,
@@ -365,7 +379,7 @@ class CalendarService:
         Returns:
             Updated event data
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gcal_mock and self.service:
             try:
                 # Get existing event
                 event = self.service.events().get(
@@ -418,7 +432,7 @@ class CalendarService:
             user_id: The user's ID
             event_id: The event ID
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gcal_mock and self.service:
             try:
                 self.service.events().delete(
                     calendarId="primary",

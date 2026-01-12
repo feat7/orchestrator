@@ -43,7 +43,9 @@ class GcalAgent(BaseAgent):
         Returns:
             List of matching events, ranked by RRF score
         """
-        query_embedding = await self.embeddings.embed(query)
+        # Use a default query for embedding if empty (e.g., date-only queries)
+        embedding_query = query if query.strip() else "calendar events meetings"
+        query_embedding = await self.embeddings.embed(embedding_query)
 
         # 1. BM25 search - also apply filters
         bm25_results = await self.calendar.search_events_bm25(
@@ -53,11 +55,11 @@ class GcalAgent(BaseAgent):
             limit=20,
         )
 
-        # 2. Vector search
+        # 2. Vector search (also apply filters for date-constrained queries)
         semantic_results = await self.calendar.search_events(
             user_id=user_id,
             embedding=query_embedding,
-            filters=None,
+            filters=filters,
             limit=20,
         )
 

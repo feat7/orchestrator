@@ -29,9 +29,10 @@ def get_intent_classifier_prompt(current_datetime: datetime) -> str:
     iso_tomorrow = (current_datetime + timedelta(days=1)).strftime("%Y-%m-%d")
     iso_day_after = (current_datetime + timedelta(days=2)).strftime("%Y-%m-%d")
 
-    # Calculate start of this week (Monday)
+    # Calculate start of this week (Monday) and end of this week (Sunday)
     days_since_monday = current_datetime.weekday()
     start_of_week = (current_datetime - timedelta(days=days_since_monday)).strftime("%Y-%m-%d")
+    end_of_week = (current_datetime + timedelta(days=(6 - days_since_monday))).strftime("%Y-%m-%d")
 
     return f"""You are an intent classifier for a Google Workspace assistant.
 Given a user query, classify it and extract the EXACT parameters needed for execution.
@@ -41,6 +42,7 @@ CURRENT DATE/TIME: {date_str} at {time_str}
 - Yesterday (ISO): {iso_yesterday}
 - Tomorrow (ISO): {iso_tomorrow}
 - Start of this week (Monday): {start_of_week}
+- End of this week (Sunday): {end_of_week}
 - 7 days ago: {iso_week_ago}
 - 30 days ago: {iso_month_ago}
 
@@ -123,9 +125,10 @@ CRITICAL RULES:
 1. For temporal queries, CALCULATE the actual ISO date - don't use words like "recent":
    - "recent files" → modified_after: "{iso_month_ago}"
    - "last week" / "past week" → modified_after: "{iso_week_ago}"
-   - "this week" → modified_after: "{start_of_week}"
+   - "this week" (for files) → modified_after: "{start_of_week}"
+   - "this week" (for calendar) → start_after: "{start_of_week}T00:00:00", start_before: "{end_of_week}T23:59:59"
    - "yesterday" → modified_after: "{iso_yesterday}", modified_before: "{iso_today}"
-   - "today" → modified_after: "{iso_today}"
+   - "today" → modified_after: "{iso_today}" (for files/emails), start_after: "{iso_today}T00:00:00", start_before: "{iso_tomorrow}T00:00:00" (for calendar)
    - "tomorrow" → start_after: "{iso_tomorrow}T00:00:00", start_before: "{iso_day_after}T00:00:00"
 
 2. If a step needs data from a previous step, use depends_on: [step_index]
@@ -135,6 +138,12 @@ CRITICAL RULES:
 4. If recipient is a NAME (not email), set to_name AND add search_gmail step first with depends_on
 
 5. CONVERSATIONAL RESPONSES: If the user message is just an acknowledgment or reaction (e.g., "interesting", "cool", "nice", "okay", "thanks", "got it", "I see", "makes sense"), use operation: "chat" with empty steps - these are NOT search queries!
+
+6. MULTI-SOURCE QUERIES: For broad queries about productivity, tasks, priorities, or "what's important", search MULTIPLE sources:
+   - "what important things this week" → search BOTH calendar AND gmail (important emails)
+   - "what do I need to do today" → search calendar events AND emails received today
+   - "anything I need to know" → search emails AND calendar
+   When in doubt about which service applies, search multiple services in parallel.
 
 OUTPUT FORMAT (JSON):
 {{
@@ -234,6 +243,66 @@ Query: "emails from Sarah last week"
     {{"step": "search_gmail", "params": {{"search_query": "", "sender": "Sarah", "after_date": "{iso_week_ago}"}}}}
   ],
   "confidence": 0.95
+}}
+
+Query: "my meetings this week" or "what's on my calendar this week"
+{{
+  "services": ["gcal"],
+  "operation": "search",
+  "steps": [
+    {{"step": "search_calendar", "params": {{"search_query": "", "start_after": "{start_of_week}T00:00:00", "start_before": "{end_of_week}T23:59:59"}}}}
+  ],
+  "confidence": 0.95
+}}
+
+Query: "what important things do I have this week" or "what do I need to do this week"
+{{
+  "services": ["gcal", "gmail"],
+  "operation": "search",
+  "steps": [
+    {{"step": "search_calendar", "params": {{"search_query": "", "start_after": "{start_of_week}T00:00:00", "start_before": "{end_of_week}T23:59:59"}}}},
+    {{"step": "search_gmail", "params": {{"search_query": "important", "after_date": "{start_of_week}"}}}}
+  ],
+  "confidence": 0.9
+}}
+
+Query: "what do I need to know today" or "anything important today"
+{{
+  "services": ["gcal", "gmail"],
+  "operation": "search",
+  "steps": [
+    {{"step": "search_calendar", "params": {{"search_query": "", "start_after": "{iso_today}T00:00:00", "start_before": "{iso_tomorrow}T00:00:00"}}}},
+    {{"step": "search_gmail", "params": {{"search_query": "", "after_date": "{iso_today}"}}}}
+  ],
+  "confidence": 0.9
+}}
+
+COMPLEX MULTI-SERVICE WORKFLOWS:
+
+Query: "cancel my Turkish Airlines flight" or "cancel my flight" (any airline)
+For flight cancellation, search for booking confirmation, find calendar event, then draft cancellation:
+{{
+  "services": ["gmail", "gcal"],
+  "operation": "action",
+  "steps": [
+    {{"step": "search_gmail", "params": {{"search_query": "Turkish Airlines flight booking confirmation"}}}},
+    {{"step": "search_calendar", "params": {{"search_query": "Turkish Airlines flight"}}}},
+    {{"step": "draft_email", "params": {{"to": "support@turkishairlines.com", "subject": "Flight Cancellation Request", "body": "I would like to cancel my upcoming flight. Booking reference will be filled from search results."}}, "depends_on": [0]}}
+  ],
+  "confidence": 0.9
+}}
+
+Query: "prepare for tomorrow's meeting with Acme Corp" or "prepare for my meeting with [company]"
+For meeting prep, search calendar for the meeting, then find related emails and files:
+{{
+  "services": ["gcal", "gmail", "gdrive"],
+  "operation": "search",
+  "steps": [
+    {{"step": "search_calendar", "params": {{"search_query": "Acme Corp", "start_after": "{iso_tomorrow}T00:00:00", "start_before": "{iso_day_after}T00:00:00"}}}},
+    {{"step": "search_gmail", "params": {{"search_query": "Acme Corp"}}}},
+    {{"step": "search_drive", "params": {{"search_query": "Acme Corp"}}}}
+  ],
+  "confidence": 0.9
 }}
 
 FOLLOW-UP QUERIES ABOUT PREVIOUS RESULTS:

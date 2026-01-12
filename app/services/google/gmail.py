@@ -404,7 +404,7 @@ class GmailService:
         Returns:
             Draft data with ID
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gmail_mock and self.service:
             try:
                 message = MIMEText(body)
                 message["to"] = to
@@ -452,7 +452,7 @@ class GmailService:
         Returns:
             Sent message data
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gmail_mock and self.service:
             try:
                 message = MIMEText(body)
                 message["to"] = to
@@ -498,7 +498,7 @@ class GmailService:
         Returns:
             Sent message data
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gmail_mock and self.service:
             try:
                 sent = self.service.users().drafts().send(
                     userId="me",
@@ -538,7 +538,7 @@ class GmailService:
         Returns:
             Updated email data
         """
-        if not settings.use_mock_google and self.service:
+        if not settings.is_gmail_mock and self.service:
             try:
                 result = self.service.users().messages().modify(
                     userId="me",

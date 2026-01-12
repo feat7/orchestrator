@@ -152,8 +152,14 @@ async def get_user_credentials(
 
     Returns:
         Google Credentials object or None
+
+    Note:
+        Returns None if all services are using mock mode.
+        Use settings.is_gmail_mock, settings.is_gcal_mock, settings.is_gdrive_mock
+        to check individual service mock status.
     """
-    if settings.use_mock_google:
+    # Return None if all services use mock mode (no real credentials needed)
+    if settings.is_gmail_mock and settings.is_gcal_mock and settings.is_gdrive_mock:
         return None
 
     try:

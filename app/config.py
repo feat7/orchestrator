@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Literal
+from typing import Literal, Optional
 
 
 class Settings(BaseSettings):
@@ -22,10 +22,40 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
 
     # Google API settings
+    # Master switch - if True, all services use mock data
     use_mock_google: bool = True
+
+    # Per-service mock settings (override master switch when set to False)
+    # These allow using mock data for some services while using real APIs for others
+    # Only effective when use_mock_google is False
+    use_mock_gmail: Optional[bool] = None  # None = follow use_mock_google
+    use_mock_gcal: Optional[bool] = None   # None = follow use_mock_google
+    use_mock_gdrive: Optional[bool] = None # None = follow use_mock_google
+
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/api/v1/auth/callback"
+
+    @property
+    def is_gmail_mock(self) -> bool:
+        """Check if Gmail should use mock data."""
+        if self.use_mock_google:
+            return True
+        return self.use_mock_gmail if self.use_mock_gmail is not None else False
+
+    @property
+    def is_gcal_mock(self) -> bool:
+        """Check if Google Calendar should use mock data."""
+        if self.use_mock_google:
+            return True
+        return self.use_mock_gcal if self.use_mock_gcal is not None else False
+
+    @property
+    def is_gdrive_mock(self) -> bool:
+        """Check if Google Drive should use mock data."""
+        if self.use_mock_google:
+            return True
+        return self.use_mock_gdrive if self.use_mock_gdrive is not None else False
 
     # Google OAuth scopes
     google_scopes: list = [

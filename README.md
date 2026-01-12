@@ -66,10 +66,33 @@ flowchart LR
     O --> GA[Gmail Agent]
     O --> CA[Calendar Agent]
     O --> DA[Drive Agent]
-    GA & CA & DA --> DB[(pgvector)]
-    GA & CA & DA --> RS[Response Synthesizer]
+    GA & CA & DA --> HS[Hybrid Search]
+    HS --> RS[Response Synthesizer]
     RS --> R[Streaming Response]
 ```
+
+### Hybrid Search Architecture
+
+We use **3-way Reciprocal Rank Fusion (RRF)** to combine multiple search methods:
+
+```mermaid
+flowchart TB
+    Q[User Query] --> E[Generate Embedding]
+    E --> BM25[BM25 Full-Text<br/>PostgreSQL ts_vector]
+    E --> VEC[Vector Similarity<br/>pgvector cosine]
+    E --> FIL[Filtered Vector<br/>+ metadata filters]
+    BM25 --> RRF[RRF Fusion<br/>score = Σ 1/k+rank]
+    VEC --> RRF
+    FIL --> RRF
+    RRF --> BOOST[Filter Boost 1.5x]
+    BOOST --> TOP[Top 10 Results]
+```
+
+| Method | What It Does | Latency |
+|--------|--------------|---------|
+| **BM25** | PostgreSQL full-text search | ~5ms |
+| **Vector** | Cosine similarity on embeddings | ~20ms |
+| **Filtered** | Vector + metadata (sender, date) | ~20ms |
 
 See [Design Documentation](docs/DESIGN.md) for detailed architecture and scaling strategy.
 
@@ -113,13 +136,61 @@ See [Design Documentation](docs/DESIGN.md) for detailed architecture and scaling
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/v1/query` | Process natural language query |
+| POST | `/api/v1/intent` | Classify intent only (no execution) |
 | POST | `/api/v1/query/stream` | Streaming query response (SSE) |
 | GET | `/api/v1/health` | Health check |
 | POST | `/api/v1/sync/trigger` | Trigger data sync |
 | GET | `/api/v1/sync/status` | Get sync status |
 | GET | `/api/v1/metrics/precision` | Search quality benchmark |
 
-See [API Documentation](docs/API.md) for details.
+### Example: Intent Classification
+
+```bash
+curl -X POST http://localhost:8000/api/v1/intent \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Cancel my Turkish Airlines flight"}'
+```
+
+Response:
+```json
+{
+  "query": "Cancel my Turkish Airlines flight",
+  "intent": {
+    "services": ["gmail", "gcal"],
+    "operation": "action",
+    "steps": [
+      {"step": "search_gmail", "params": {"search_query": "Turkish Airlines flight booking"}},
+      {"step": "search_calendar", "params": {"search_query": "Turkish Airlines flight"}},
+      {"step": "draft_email", "params": {"to": "support@turkishairlines.com", "subject": "Flight Cancellation Request"}}
+    ],
+    "confidence": 0.9
+  },
+  "latency_ms": 1850
+}
+```
+
+### Example: Full Query Execution
+
+```bash
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What important things to do this week?"}'
+```
+
+Response:
+```json
+{
+  "response": "Here's what's important this week:\n\n- Monday at 9:00 AM: Daily Standup\n- Monday at 11:00 AM: 1:1 with Manager\n- Tuesday at 10:00 AM: Acme Corp Partnership Meeting\n\nNo urgent emails found for this week.",
+  "actions_taken": [
+    {"step": "search_calendar", "success": true, "data": {"results": [...]}},
+    {"step": "search_gmail", "success": true, "data": {"results": [...]}}
+  ],
+  "intent": {"services": ["gcal", "gmail"], "operation": "search", ...},
+  "latency_ms": 3200
+}
+```
+
+See [API Documentation](docs/API.md) for details and [Sample Queries](docs/sample_queries.md) for more examples.
 
 ## Configuration
 
