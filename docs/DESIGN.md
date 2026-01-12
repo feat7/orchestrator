@@ -9,7 +9,7 @@ An intelligent orchestrator that processes natural language queries across Gmail
 ```mermaid
 flowchart TB
     subgraph Input
-        Q[User Query<br/>"Cancel my Turkish Airlines flight"]
+        Q[User Query<br/>Cancel my Turkish Airlines flight]
     end
 
     subgraph Classification
@@ -252,7 +252,7 @@ We combine three retrieval methods and fuse them using Reciprocal Rank Fusion (R
 ```mermaid
 flowchart TB
     subgraph Input
-        Q[User Query<br/>"emails about budget from Sarah"]
+        Q[User Query<br/>emails about budget from Sarah]
         E[Generate Embedding<br/>1536-dim vector]
     end
 
