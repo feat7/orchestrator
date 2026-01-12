@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Workspace</title>
+    <title>Workspace Orchestrator</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         * {
@@ -798,6 +798,27 @@
             margin-top: 8px;
         }
 
+        .footer-links {
+            text-align: center;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 8px;
+        }
+
+        .footer-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+
+        .footer-links a:hover {
+            color: var(--text-secondary);
+            text-decoration: underline;
+        }
+
+        .footer-links span {
+            margin: 0 6px;
+        }
+
         /* Auth */
         .auth {
             flex: 1;
@@ -862,6 +883,26 @@
             box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
 
+        .auth-footer {
+            margin-top: 24px;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .auth-footer a {
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+
+        .auth-footer a:hover {
+            color: var(--text-secondary);
+            text-decoration: underline;
+        }
+
+        .auth-footer span {
+            margin: 0 6px;
+        }
+
         /* Mobile */
         @media (max-width: 768px) {
             .sidebar {
@@ -923,7 +964,7 @@
 
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <div class="logo">Workspace</div>
+                <div class="logo">Workspace Orchestrator</div>
                 <button class="new-chat" onclick="startNewChat()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -1046,6 +1087,11 @@
                         </button>
                     </form>
                     <div class="input-hint">Enter to send, Shift+Enter for new line</div>
+                    <div class="footer-links">
+                        <a href="/privacy.html" target="_blank">Privacy Policy</a>
+                        <span>·</span>
+                        <a href="/terms.html" target="_blank">Terms of Service</a>
+                    </div>
                 </div>
             </div>
 
@@ -1073,6 +1119,11 @@
                         </svg>
                         Continue as Demo User
                     </button>
+                    <div class="auth-footer">
+                        <a href="/privacy.html" target="_blank">Privacy Policy</a>
+                        <span>·</span>
+                        <a href="/terms.html" target="_blank">Terms of Service</a>
+                    </div>
                 </div>
             </div>
         </main>
