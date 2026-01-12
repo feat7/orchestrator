@@ -140,9 +140,10 @@ CRITICAL RULES:
 5. CONVERSATIONAL RESPONSES: If the user message is just an acknowledgment or reaction (e.g., "interesting", "cool", "nice", "okay", "thanks", "got it", "I see", "makes sense"), use operation: "chat" with empty steps - these are NOT search queries!
 
 6. MULTI-SOURCE QUERIES: For broad queries about productivity, tasks, priorities, or "what's important", search MULTIPLE sources:
-   - "what important things this week" → search BOTH calendar AND gmail (important emails)
+   - "what important things this week" → search BOTH calendar AND gmail (use label: "IMPORTANT" filter for gmail)
    - "what do I need to do today" → search calendar events AND emails received today
    - "anything I need to know" → search emails AND calendar
+   - For "important" email queries, use label: "IMPORTANT" filter AND search_query: "urgent" to find both labeled important emails AND urgent subjects
    When in doubt about which service applies, search multiple services in parallel.
 
 OUTPUT FORMAT (JSON):
@@ -255,13 +256,13 @@ Query: "my meetings this week" or "what's on my calendar this week"
   "confidence": 0.95
 }}
 
-Query: "what important things do I have this week" or "what do I need to do this week"
+Query: "what important things do I have this week" or "what do I need to do this week" or "anything important in coming days"
 {{
   "services": ["gcal", "gmail"],
   "operation": "search",
   "steps": [
     {{"step": "search_calendar", "params": {{"search_query": "", "start_after": "{start_of_week}T00:00:00", "start_before": "{end_of_week}T23:59:59"}}}},
-    {{"step": "search_gmail", "params": {{"search_query": "important", "after_date": "{start_of_week}"}}}}
+    {{"step": "search_gmail", "params": {{"search_query": "urgent", "label": "IMPORTANT"}}}}
   ],
   "confidence": 0.9
 }}
@@ -272,7 +273,7 @@ Query: "what do I need to know today" or "anything important today"
   "operation": "search",
   "steps": [
     {{"step": "search_calendar", "params": {{"search_query": "", "start_after": "{iso_today}T00:00:00", "start_before": "{iso_tomorrow}T00:00:00"}}}},
-    {{"step": "search_gmail", "params": {{"search_query": "", "after_date": "{iso_today}"}}}}
+    {{"step": "search_gmail", "params": {{"search_query": "urgent", "label": "IMPORTANT", "after_date": "{iso_today}"}}}}
   ],
   "confidence": 0.9
 }}

@@ -79,13 +79,25 @@ class GmailService:
                 query = query.where(
                     GmailCache.sender.ilike(f"%{filters['sender']}%")
                 )
-            if filters.get("date_from"):
-                query = query.where(GmailCache.received_at >= filters["date_from"])
-            if filters.get("date_to"):
-                query = query.where(GmailCache.received_at <= filters["date_to"])
+            # Support both date_from/date_to and after_date/before_date
+            date_from = filters.get("date_from") or filters.get("after_date")
+            date_to = filters.get("date_to") or filters.get("before_date")
+            if date_from:
+                if isinstance(date_from, str):
+                    date_from = datetime.fromisoformat(date_from.replace("Z", "+00:00").replace("T", " ").split("+")[0])
+                query = query.where(GmailCache.received_at >= date_from)
+            if date_to:
+                if isinstance(date_to, str):
+                    date_to = datetime.fromisoformat(date_to.replace("Z", "+00:00").replace("T", " ").split("+")[0])
+                query = query.where(GmailCache.received_at <= date_to)
             if filters.get("subject"):
                 query = query.where(
                     GmailCache.subject.ilike(f"%{filters['subject']}%")
+                )
+            # Filter by label (e.g., "IMPORTANT", "INBOX")
+            if filters.get("label"):
+                query = query.where(
+                    GmailCache.labels.op("?")(filters["label"])
                 )
 
             # Handle time_range strings (convert to dates)
@@ -199,13 +211,25 @@ class GmailService:
                 query_stmt = query_stmt.where(
                     GmailCache.sender.ilike(f"%{filters['sender']}%")
                 )
-            if filters.get("date_from"):
-                query_stmt = query_stmt.where(GmailCache.received_at >= filters["date_from"])
-            if filters.get("date_to"):
-                query_stmt = query_stmt.where(GmailCache.received_at <= filters["date_to"])
+            # Support both date_from/date_to and after_date/before_date
+            date_from = filters.get("date_from") or filters.get("after_date")
+            date_to = filters.get("date_to") or filters.get("before_date")
+            if date_from:
+                if isinstance(date_from, str):
+                    date_from = datetime.fromisoformat(date_from.replace("Z", "+00:00").replace("T", " ").split("+")[0])
+                query_stmt = query_stmt.where(GmailCache.received_at >= date_from)
+            if date_to:
+                if isinstance(date_to, str):
+                    date_to = datetime.fromisoformat(date_to.replace("Z", "+00:00").replace("T", " ").split("+")[0])
+                query_stmt = query_stmt.where(GmailCache.received_at <= date_to)
             if filters.get("subject"):
                 query_stmt = query_stmt.where(
                     GmailCache.subject.ilike(f"%{filters['subject']}%")
+                )
+            # Filter by label (e.g., "IMPORTANT", "INBOX")
+            if filters.get("label"):
+                query_stmt = query_stmt.where(
+                    GmailCache.labels.op("?")(filters["label"])
                 )
 
             # Handle time_range strings (convert to dates)
@@ -293,13 +317,25 @@ class GmailService:
             query = query.where(
                 GmailCache.sender.ilike(f"%{filters['sender']}%")
             )
-        if filters.get("date_from"):
-            query = query.where(GmailCache.received_at >= filters["date_from"])
-        if filters.get("date_to"):
-            query = query.where(GmailCache.received_at <= filters["date_to"])
+        # Support both date_from/date_to and after_date/before_date
+        date_from = filters.get("date_from") or filters.get("after_date")
+        date_to = filters.get("date_to") or filters.get("before_date")
+        if date_from:
+            if isinstance(date_from, str):
+                date_from = datetime.fromisoformat(date_from.replace("Z", "+00:00").replace("T", " ").split("+")[0])
+            query = query.where(GmailCache.received_at >= date_from)
+        if date_to:
+            if isinstance(date_to, str):
+                date_to = datetime.fromisoformat(date_to.replace("Z", "+00:00").replace("T", " ").split("+")[0])
+            query = query.where(GmailCache.received_at <= date_to)
         if filters.get("subject"):
             query = query.where(
                 GmailCache.subject.ilike(f"%{filters['subject']}%")
+            )
+        # Filter by label (e.g., "IMPORTANT", "INBOX")
+        if filters.get("label"):
+            query = query.where(
+                GmailCache.labels.op("?")(filters["label"])
             )
 
         # Handle time_range strings (convert to dates)
