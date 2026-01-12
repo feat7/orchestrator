@@ -223,6 +223,8 @@ class Orchestrator:
                 filters["after_date"] = params["after_date"]
             if params.get("before_date"):
                 filters["before_date"] = params["before_date"]
+            if params.get("label"):
+                filters["label"] = params["label"]
 
             # Calendar filters
             if params.get("start_after"):

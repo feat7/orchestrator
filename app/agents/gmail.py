@@ -56,11 +56,17 @@ class GmailAgent(BaseAgent):
         """Search emails using 3-way hybrid search with RRF fusion.
 
         Combines three retrieval methods for best results:
-        1. BM25/Full-text search (keyword matching) - fast, ~5ms
-        2. Vector search (semantic similarity) - ~20ms
-        3. Filtered vector search (if filters provided) - ~20ms
+        1. BM25/Full-text search (keyword matching + all filters except label) - fast, ~5ms
+        2. Vector search (semantic similarity, no filters) - ~20ms
+        3. Filtered vector search (semantic + all filters including label) - ~20ms
 
-        Results are fused using Reciprocal Rank Fusion (RRF) - no neural models.
+        The label filter acts as a ranking boost (via filtered search), not a hard filter.
+        This ensures emails matching the query appear, with labeled ones ranked higher.
+
+        For time-based queries like "important things this week":
+        - Date filter restricts to the time range (primary filter)
+        - Semantic search finds relevant content within that range
+        - IMPORTANT label boosts ranking for labeled emails
 
         When query is empty but filters exist (e.g., "emails from last week"),
         falls back to filter-only search without semantic matching.
@@ -88,16 +94,20 @@ class GmailAgent(BaseAgent):
         # Generate embedding for semantic search
         query_embedding = await self.embeddings.embed(query)
 
+        # For BM25: use all filters EXCEPT label (label is a boost, not a hard filter)
+        # This ensures keyword matches aren't excluded just because they lack the label
+        filters_without_label = {k: v for k, v in (filters or {}).items() if k != "label"}
+
         # Run searches sequentially (SQLAlchemy session limitation)
-        # 1. BM25/Full-text search (keyword matching) - also apply filters
+        # 1. BM25/Full-text search - uses date/sender filters, but NOT label
         bm25_results = await self.gmail.search_emails_bm25(
             user_id=user_id,
             query=query,
-            filters=filters,
+            filters=filters_without_label if filters_without_label else None,
             limit=20,
         )
 
-        # 2. Vector search (semantic)
+        # 2. Vector search (pure semantic, no filters for broad matching)
         semantic_results = await self.gmail.search_emails(
             user_id=user_id,
             embedding=query_embedding,
@@ -105,7 +115,8 @@ class GmailAgent(BaseAgent):
             limit=20,
         )
 
-        # 3. Filtered vector search (if filters provided)
+        # 3. Filtered vector search - semantic + ALL filters including label
+        # This boosts emails that match semantically AND have the label + date range
         filtered_results = []
         if filters:
             filtered_results = await self.gmail.search_emails(
@@ -139,7 +150,7 @@ class GmailAgent(BaseAgent):
         Args:
             bm25_results: Results from BM25/full-text search
             semantic_results: Results from vector/semantic search
-            filtered_results: Results from filtered vector search
+            filtered_results: Results from filtered vector search (includes label boost)
             k: RRF constant (default 60, standard value)
 
         Returns:
@@ -171,6 +182,7 @@ class GmailAgent(BaseAgent):
                 match_sources[email_id].append("semantic")
 
         # Process filtered results (with bonus weight for filter match)
+        # Emails matching semantic + date + label get boosted here
         for rank, result in enumerate(filtered_results, start=1):
             email_id = result.get("id")
             if email_id:

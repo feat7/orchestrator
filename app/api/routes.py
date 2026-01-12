@@ -213,9 +213,12 @@ async def process_query(
         # Create conversation if new
         if not request.conversation_id:
             from app.db.models import Conversation
+            # Generate title from first query (truncated to 100 chars)
+            title = request.query[:100] + "..." if len(request.query) > 100 else request.query
             conversation = Conversation(
                 id=conversation_id,
                 user_id=UUID(current_user.user_id),
+                title=title,
             )
             db.add(conversation)
 

@@ -135,14 +135,18 @@ CRITICAL RULES:
 
 3. For email sending: ALWAYS use draft_email first, NEVER send_email directly
 
-4. If recipient is a NAME (not email), set to_name AND add search_gmail step first with depends_on
+4. If recipient is a NAME (not email), set to_name AND add search_gmail step with ONLY sender filter (no search_query) to find their email address, then add draft_email with depends_on
 
 5. CONVERSATIONAL RESPONSES: If the user message is just an acknowledgment or reaction (e.g., "interesting", "cool", "nice", "okay", "thanks", "got it", "I see", "makes sense"), use operation: "chat" with empty steps - these are NOT search queries!
 
 6. MULTI-SOURCE QUERIES: For broad queries about productivity, tasks, priorities, or "what's important", search MULTIPLE sources:
-   - "what important things this week" → search BOTH calendar AND gmail (important emails)
+   - "what important things this week" → search BOTH calendar AND gmail
    - "what do I need to do today" → search calendar events AND emails received today
    - "anything I need to know" → search emails AND calendar
+   For "important" email queries:
+   - DATE FILTER IS PRIMARY - always set after_date/before_date for the time range mentioned
+   - Use broad search_query: "important urgent deadline action required priority" to find priority signals
+   - Optionally add label: "IMPORTANT" as a ranking boost (emails with this label rank higher, but aren't required)
    When in doubt about which service applies, search multiple services in parallel.
 
 OUTPUT FORMAT (JSON):
@@ -214,12 +218,13 @@ Query: "what's in the Orchestrator file?" or "tell me the contents of that doc"
   "confidence": 0.9
 }}
 
-Query: "send email to John about the meeting"
+Query: "send email to John about the meeting" or "draft an email to John about the project update"
+For recipient resolution, search ONLY by sender (no search_query) to find their email address:
 {{
   "services": ["gmail"],
   "operation": "draft",
   "steps": [
-    {{"step": "search_gmail", "params": {{"search_query": "John", "sender": "John"}}}},
+    {{"step": "search_gmail", "params": {{"sender": "John"}}}},
     {{"step": "draft_email", "params": {{"to_name": "John", "message": "about the meeting"}}, "depends_on": [0]}}
   ],
   "confidence": 0.9
@@ -255,13 +260,13 @@ Query: "my meetings this week" or "what's on my calendar this week"
   "confidence": 0.95
 }}
 
-Query: "what important things do I have this week" or "what do I need to do this week"
+Query: "what important things do I have this week" or "what do I need to do this week" or "anything important in coming days"
 {{
   "services": ["gcal", "gmail"],
   "operation": "search",
   "steps": [
     {{"step": "search_calendar", "params": {{"search_query": "", "start_after": "{start_of_week}T00:00:00", "start_before": "{end_of_week}T23:59:59"}}}},
-    {{"step": "search_gmail", "params": {{"search_query": "important", "after_date": "{start_of_week}"}}}}
+    {{"step": "search_gmail", "params": {{"search_query": "important urgent deadline action required", "after_date": "{start_of_week}", "before_date": "{end_of_week}", "label": "IMPORTANT"}}}}
   ],
   "confidence": 0.9
 }}
@@ -272,7 +277,7 @@ Query: "what do I need to know today" or "anything important today"
   "operation": "search",
   "steps": [
     {{"step": "search_calendar", "params": {{"search_query": "", "start_after": "{iso_today}T00:00:00", "start_before": "{iso_tomorrow}T00:00:00"}}}},
-    {{"step": "search_gmail", "params": {{"search_query": "", "after_date": "{iso_today}"}}}}
+    {{"step": "search_gmail", "params": {{"search_query": "important urgent deadline action required", "after_date": "{iso_today}", "label": "IMPORTANT"}}}}
   ],
   "confidence": 0.9
 }}
