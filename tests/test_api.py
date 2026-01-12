@@ -69,13 +69,25 @@ async def test_auth_status_unauthenticated(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_auth_login_endpoint(client: AsyncClient):
-    """Test auth login endpoint redirects to Google."""
+    """Test auth login endpoint behavior.
+
+    In mock mode (USE_MOCK_GOOGLE=true), returns 400 directing to demo-login.
+    In production mode, would redirect to Google OAuth.
+    """
+    from app.config import settings
+
     response = await client.get("/api/v1/auth/login", follow_redirects=False)
 
-    # Should redirect to Google OAuth
-    assert response.status_code in [302, 307]
-    location = response.headers.get("location", "")
-    assert "accounts.google.com" in location or "googleapis.com" in location
+    if settings.use_mock_google:
+        # In mock mode, should return 400 with guidance to use demo-login
+        assert response.status_code == 400
+        data = response.json()
+        assert "demo-login" in data.get("detail", "").lower()
+    else:
+        # In production mode, should redirect to Google OAuth
+        assert response.status_code in [302, 307]
+        location = response.headers.get("location", "")
+        assert "accounts.google.com" in location or "googleapis.com" in location
 
 
 def test_query_request_schema():

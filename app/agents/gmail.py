@@ -53,16 +53,20 @@ class GmailAgent(BaseAgent):
     async def search(
         self, query: str, user_id: str, filters: Optional[dict] = None
     ) -> list[dict]:
-        """Search emails using 4-way hybrid search with RRF fusion.
+        """Search emails using 3-way hybrid search with RRF fusion.
 
-        Combines retrieval methods for best results with OR logic for labels:
-        1. BM25/Full-text search (keyword matching, no label filter) - fast, ~5ms
+        Combines three retrieval methods for best results:
+        1. BM25/Full-text search (keyword matching + all filters except label) - fast, ~5ms
         2. Vector search (semantic similarity, no filters) - ~20ms
-        3. Filtered vector search (if filters provided) - ~20ms
-        4. Label-only search (if label filter provided) - ensures labeled emails appear
+        3. Filtered vector search (semantic + all filters including label) - ~20ms
 
-        Results are fused using Reciprocal Rank Fusion (RRF) - no neural models.
-        This ensures emails matching EITHER the content OR the label filter appear.
+        The label filter acts as a ranking boost (via filtered search), not a hard filter.
+        This ensures emails matching the query appear, with labeled ones ranked higher.
+
+        For time-based queries like "important things this week":
+        - Date filter restricts to the time range (primary filter)
+        - Semantic search finds relevant content within that range
+        - IMPORTANT label boosts ranking for labeled emails
 
         When query is empty but filters exist (e.g., "emails from last week"),
         falls back to filter-only search without semantic matching.
@@ -90,13 +94,12 @@ class GmailAgent(BaseAgent):
         # Generate embedding for semantic search
         query_embedding = await self.embeddings.embed(query)
 
-        # Separate label filter from other filters for OR logic
-        # Label filter should NOT restrict keyword/semantic search
-        label_filter = filters.get("label") if filters else None
+        # For BM25: use all filters EXCEPT label (label is a boost, not a hard filter)
+        # This ensures keyword matches aren't excluded just because they lack the label
         filters_without_label = {k: v for k, v in (filters or {}).items() if k != "label"}
 
         # Run searches sequentially (SQLAlchemy session limitation)
-        # 1. BM25/Full-text search (keyword matching) - NO label filter for OR logic
+        # 1. BM25/Full-text search - uses date/sender filters, but NOT label
         bm25_results = await self.gmail.search_emails_bm25(
             user_id=user_id,
             query=query,
@@ -104,7 +107,7 @@ class GmailAgent(BaseAgent):
             limit=20,
         )
 
-        # 2. Vector search (semantic)
+        # 2. Vector search (pure semantic, no filters for broad matching)
         semantic_results = await self.gmail.search_emails(
             user_id=user_id,
             embedding=query_embedding,
@@ -112,7 +115,8 @@ class GmailAgent(BaseAgent):
             limit=20,
         )
 
-        # 3. Filtered vector search (if filters provided, includes label)
+        # 3. Filtered vector search - semantic + ALL filters including label
+        # This boosts emails that match semantically AND have the label + date range
         filtered_results = []
         if filters:
             filtered_results = await self.gmail.search_emails(
@@ -122,22 +126,11 @@ class GmailAgent(BaseAgent):
                 limit=20,
             )
 
-        # 4. Label-only search (if label filter provided) - ensures labeled emails appear
-        # This implements OR logic: emails with label OR matching content
-        label_only_results = []
-        if label_filter:
-            label_only_results = await self.gmail.search_emails_filter_only(
-                user_id=user_id,
-                filters={"label": label_filter},
-                limit=20,
-            )
-
         # Combine using RRF fusion
         results = self._rrf_fusion(
             bm25_results=bm25_results,
             semantic_results=semantic_results,
             filtered_results=filtered_results,
-            label_only_results=label_only_results,
         )
 
         return results
@@ -147,7 +140,6 @@ class GmailAgent(BaseAgent):
         bm25_results: list[dict],
         semantic_results: list[dict],
         filtered_results: list[dict],
-        label_only_results: Optional[list[dict]] = None,
         k: int = 60,
     ) -> list[dict]:
         """Combine results using Reciprocal Rank Fusion (RRF).
@@ -158,8 +150,7 @@ class GmailAgent(BaseAgent):
         Args:
             bm25_results: Results from BM25/full-text search
             semantic_results: Results from vector/semantic search
-            filtered_results: Results from filtered vector search
-            label_only_results: Results from label-only filter search (for OR logic)
+            filtered_results: Results from filtered vector search (includes label boost)
             k: RRF constant (default 60, standard value)
 
         Returns:
@@ -191,6 +182,7 @@ class GmailAgent(BaseAgent):
                 match_sources[email_id].append("semantic")
 
         # Process filtered results (with bonus weight for filter match)
+        # Emails matching semantic + date + label get boosted here
         for rank, result in enumerate(filtered_results, start=1):
             email_id = result.get("id")
             if email_id:
@@ -200,18 +192,6 @@ class GmailAgent(BaseAgent):
                     result_data[email_id] = result
                     match_sources[email_id] = []
                 match_sources[email_id].append("filter")
-
-        # Process label-only results (for OR logic with labels)
-        if label_only_results:
-            for rank, result in enumerate(label_only_results, start=1):
-                email_id = result.get("id")
-                if email_id:
-                    # Give label matches a boost (similar to filter matches)
-                    rrf_scores[email_id] = rrf_scores.get(email_id, 0) + (1.2 / (k + rank))
-                    if email_id not in result_data:
-                        result_data[email_id] = result
-                        match_sources[email_id] = []
-                    match_sources[email_id].append("label")
 
         # Sort by RRF score and build final results
         sorted_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
