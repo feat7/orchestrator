@@ -6,6 +6,38 @@ All examples use the `/api/v1/intent` endpoint for intent classification and `/a
 
 ---
 
+## Query Summary Table
+
+| # | Query | Services | Operation | Confidence | Category |
+|---|-------|----------|-----------|------------|----------|
+| 1 | What's on my calendar next week? | gcal | search | 0.95 | Single Service |
+| 2 | Find emails from sarah@company.com about the budget | gmail | search | 0.95 | Single Service |
+| 3 | Show me PDFs in Drive from last month | gdrive | search | 0.90 | Single Service |
+| 4 | Cancel my Turkish Airlines flight | gmail, gcal | action | 0.90 | Multi-Service |
+| 5 | Prepare for tomorrow's meeting with Acme Corp | gcal, gmail, gdrive | search | 0.90 | Multi-Service |
+| 6 | Find events next week that conflict with my out-of-office doc | gcal, gdrive | search | 0.80 | Multi-Service |
+| 7 | Move the meeting with John | gcal | update | 0.60 | Edge Case: Ambiguous |
+| 8 | That email about the proposal (follow-up) | gmail | search | 0.75 | Edge Case: Context |
+| 9 | What meetings do I have next Tuesday? | gcal | search | 0.95 | Edge Case: Temporal |
+| 10 | Find emails about the Jupiter project | gmail | search | 0.90 | Edge Case: No Results |
+| 11 | Draft an email to john@company.com about the meeting and add it to my calendar for Friday at 2pm | gmail, gcal | create | 0.85 | Edge Case: Multiple Actions |
+| 12 | Share the contract file with external@competitor.com | gdrive | update | 0.80 | Edge Case: Permission |
+| 13 | What important things do I have this week? | gcal, gmail | search | 0.90 | Multi-Service + Label |
+
+### Filter Types Used
+
+| Filter | Services | Example |
+|--------|----------|---------|
+| `start_after` / `start_before` | gcal | Date range for calendar events |
+| `after_date` / `before_date` | gmail | Date range for emails |
+| `modified_after` / `modified_before` | gdrive | Date range for files |
+| `sender` | gmail | Filter by email sender |
+| `mime_type` | gdrive | Filter by file type (e.g., `application/pdf`) |
+| `label` | gmail | Filter by Gmail label (e.g., `IMPORTANT`) |
+| `attendee` | gcal | Filter by event attendee |
+
+---
+
 ## API Request/Response Examples
 
 ### Using the Intent Endpoint
@@ -686,6 +718,68 @@ I found the file "Service_Agreement_2024.pdf" but I need to flag a concern:
 - Current access: Only legal@company.com and sarah@acme-corp.com
 
 Are you sure you want to share this with an external party? If yes, please confirm and I'll proceed.
+```
+
+---
+
+## 13. Multi-Service: Important Things Query (Label Filter)
+
+**Query:**
+```
+What important things do I have this week?
+```
+
+**Intent Response:**
+```json
+{
+  "query": "What important things do I have this week?",
+  "intent": {
+    "services": ["gcal", "gmail"],
+    "operation": "search",
+    "steps": [
+      {
+        "step": "search_calendar",
+        "params": {
+          "search_query": "",
+          "start_after": "2026-01-12T00:00:00",
+          "start_before": "2026-01-18T23:59:59"
+        }
+      },
+      {
+        "step": "search_gmail",
+        "params": {
+          "search_query": "urgent",
+          "label": "IMPORTANT"
+        }
+      }
+    ],
+    "confidence": 0.9
+  },
+  "latency_ms": 1456
+}
+```
+
+**Search Behavior:**
+The Gmail search uses OR logic for the label filter:
+- Emails with the IMPORTANT label (regardless of content)
+- OR emails matching "urgent" semantically or by keyword
+
+This ensures you find both labeled important emails AND urgent content.
+
+**Full Query Response:**
+```
+Here's what's important this week:
+
+**Calendar Events:**
+- Monday, January 12 at 10:00 AM: Sprint Planning - Sprint 24
+- Wednesday, January 14 at 2:00 PM: All Hands Meeting (monthly review)
+
+**Important Emails:**
+- Subject: "URGENT: Deadline Reminder - Q4 Report" (marked IMPORTANT)
+- Subject: "Action Required: Review Budget Proposal"
+- Subject: "HeyGen Training Tomorrow" (marked IMPORTANT)
+
+Would you like more details about any of these items?
 ```
 
 ---
