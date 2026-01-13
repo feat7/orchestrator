@@ -280,6 +280,22 @@ class Orchestrator:
                             else:
                                 params["recipient_not_found"] = True
 
+                        # Handle attendee resolution for create_event
+                        if step.step == StepType.CREATE_EVENT and params.get("attendee_names"):
+                            attendee_names = params.get("attendee_names", [])
+                            resolved_attendees = params.get("attendees", []) or []
+
+                            for attendee_name in attendee_names:
+                                resolved = self._resolve_recipient(
+                                    dep_result.data.get("results", []),
+                                    attendee_name
+                                )
+                                if resolved.get("resolved_email"):
+                                    if resolved["resolved_email"] not in resolved_attendees:
+                                        resolved_attendees.append(resolved["resolved_email"])
+
+                            params["attendees"] = resolved_attendees
+
         return params
 
     def _resolve_recipient(self, search_results: list[dict], recipient_name: str) -> dict:

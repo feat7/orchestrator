@@ -1,11 +1,32 @@
 """Google Calendar agent for event operations."""
 
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app.agents.base import BaseAgent
 from app.schemas.intent import StepType, StepResult
 from app.services.google.calendar import CalendarService
 from app.services.embedding import EmbeddingService
+
+
+def parse_datetime(dt_str: Optional[str]) -> Optional[datetime]:
+    """Parse ISO datetime string to datetime object.
+
+    Args:
+        dt_str: ISO datetime string (e.g., "2024-01-15T14:00:00")
+
+    Returns:
+        datetime object or None if parsing fails
+    """
+    if not dt_str:
+        return None
+    if isinstance(dt_str, datetime):
+        return dt_str
+    try:
+        # Handle timezone suffix
+        return datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
 
 
 class GcalAgent(BaseAgent):
@@ -150,11 +171,27 @@ class GcalAgent(BaseAgent):
                 return StepResult(step=step, success=False, error="Event not found")
 
             elif step == StepType.CREATE_EVENT:
+                # Parse ISO datetime strings to datetime objects
+                start_time = parse_datetime(params.get("start_time"))
+                end_time = parse_datetime(params.get("end_time"))
+
+                # Validate required fields
+                if not start_time:
+                    return StepResult(
+                        step=step,
+                        success=False,
+                        error="Could not parse start time. Please provide a valid date and time.",
+                    )
+
+                # Default end_time to 1 hour after start if not provided
+                if not end_time:
+                    end_time = start_time + timedelta(hours=1)
+
                 event = await self.calendar.create_event(
                     user_id=user_id,
                     title=params.get("title", ""),
-                    start_time=params.get("start_time"),
-                    end_time=params.get("end_time"),
+                    start_time=start_time,
+                    end_time=end_time,
                     attendees=params.get("attendees", []),
                     description=params.get("description", ""),
                     location=params.get("location", ""),

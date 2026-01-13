@@ -104,7 +104,8 @@ AVAILABLE TOOLS AND THEIR PARAMETERS:
    - title: string (required)
    - start_time: ISO datetime (required)
    - end_time: ISO datetime (required)
-   - attendees: array of emails
+   - attendees: array of emails (if known)
+   - attendee_names: array of names (for resolving emails from search)
    - description: string
    - location: string
 
@@ -137,9 +138,11 @@ CRITICAL RULES:
 
 4. If recipient is a NAME (not email), set to_name AND add search_gmail step with ONLY sender filter (no search_query) to find their email address, then add draft_email with depends_on
 
-5. CONVERSATIONAL RESPONSES: If the user message is just an acknowledgment or reaction (e.g., "interesting", "cool", "nice", "okay", "thanks", "got it", "I see", "makes sense"), use operation: "chat" with empty steps - these are NOT search queries!
+5. For create_event: If attendee is a NAME (not email), set attendee_names AND add search_gmail step with ONLY sender filter to find their email, then add create_event with depends_on
 
-6. MULTI-SOURCE QUERIES: For broad queries about productivity, tasks, priorities, or "what's important", search MULTIPLE sources:
+6. CONVERSATIONAL RESPONSES: If the user message is just an acknowledgment or reaction (e.g., "interesting", "cool", "nice", "okay", "thanks", "got it", "I see", "makes sense"), use operation: "chat" with empty steps - these are NOT search queries!
+
+7. MULTI-SOURCE QUERIES: For broad queries about productivity, tasks, priorities, or "what's important", search MULTIPLE sources:
    - "what important things this week" → search BOTH calendar AND gmail
    - "what do I need to do today" → search calendar events AND emails received today
    - "anything I need to know" → search emails AND calendar
@@ -238,6 +241,18 @@ Query: "my meetings tomorrow"
     {{"step": "search_calendar", "params": {{"search_query": "", "start_after": "{iso_tomorrow}T00:00:00", "start_before": "{iso_day_after}T00:00:00"}}}}
   ],
   "confidence": 0.95
+}}
+
+Query: "create a meeting with Sarah tomorrow at 2pm" or "schedule a call with John next Monday at 10am"
+For attendee resolution, search by name to find their email first:
+{{
+  "services": ["gmail", "gcal"],
+  "operation": "create",
+  "steps": [
+    {{"step": "search_gmail", "params": {{"sender": "Sarah"}}}},
+    {{"step": "create_event", "params": {{"title": "Meeting with Sarah", "start_time": "{iso_tomorrow}T14:00:00", "end_time": "{iso_tomorrow}T15:00:00", "attendee_names": ["Sarah"]}}, "depends_on": [0]}}
+  ],
+  "confidence": 0.9
 }}
 
 Query: "emails from Sarah last week"
